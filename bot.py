@@ -10,6 +10,7 @@ from typing import Dict, Any, List, Optional
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, ReplyKeyboardMarkup, KeyboardButton
 from telegram.ext import Application, CommandHandler, CallbackQueryHandler, MessageHandler, filters, ContextTypes, ConversationHandler
 from dotenv import load_dotenv
+import telegram
 
 import database as db
 
@@ -924,18 +925,61 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
                         action="record_voice"
                     )
                     
+                    # Log voice message details for debugging
+                    voice_file_id = update.message.voice.file_id
+                    voice_duration = update.message.voice.duration
+                    logger.info(f"Processing voice message from {user_id} to {partner_id}: file_id={voice_file_id}, duration={voice_duration}s")
+                    
                     # Use copy_message which preserves all media
-                    await context.bot.copy_message(
+                    sent_message = await context.bot.copy_message(
                         chat_id=int(partner_id),
                         from_chat_id=update.effective_chat.id,
                         message_id=update.message.message_id
                     )
-                    logger.debug(f"Copied voice message from {user_id} to {partner_id}")
+                    
+                    # Verify the message was sent successfully
+                    if sent_message:
+                        logger.info(f"Successfully copied voice message from {user_id} to {partner_id}, new message_id={sent_message.message_id}")
+                    else:
+                        logger.warning(f"Voice message copy returned None, but no exception was raised")
+                        
+                except telegram.error.BadRequest as e:
+                    logger.error(f"BadRequest error copying voice message: {e}", exc_info=True)
+                    await update.message.reply_text(
+                        "⚠️ Не удалось отправить голосовое сообщение из-за ошибки Telegram. Попробуйте еще раз."
+                    )
+                except telegram.error.Unauthorized as e:
+                    logger.error(f"Unauthorized error copying voice message: {e}", exc_info=True)
+                    await update.message.reply_text(
+                        "⚠️ Не удалось отправить голосовое сообщение. Возможно, собеседник заблокировал бота."
+                    )
+                    # End the chat since the partner is unavailable
+                    return await end_chat(update, context)
                 except Exception as e:
                     logger.error(f"Error copying voice message: {e}", exc_info=True)
-                    await update.message.reply_text(
-                        "⚠️ Не удалось отправить голосовое сообщение. Попробуйте еще раз."
-                    )
+                    
+                    # Try alternative method - download and send
+                    try:
+                        logger.info("Attempting alternative method for voice message")
+                        voice_file = await context.bot.get_file(update.message.voice.file_id)
+                        voice_bytes = await voice_file.download_as_bytearray()
+                        
+                        # Send as new voice message
+                        sent = await context.bot.send_voice(
+                            chat_id=int(partner_id),
+                            voice=voice_bytes,
+                            duration=update.message.voice.duration,
+                            caption=update.message.caption if update.message.caption else None
+                        )
+                        
+                        if sent:
+                            logger.info(f"Successfully sent voice message using alternative method")
+                        
+                    except Exception as inner_e:
+                        logger.error(f"Alternative method also failed: {inner_e}", exc_info=True)
+                        await update.message.reply_text(
+                            "⚠️ Не удалось отправить голосовое сообщение. Попробуйте еще раз или используйте текстовые сообщения."
+                        )
             elif update.message.video_note:
                 # For video notes (circles), use copy_message
                 try:
