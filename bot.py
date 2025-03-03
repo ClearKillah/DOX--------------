@@ -1022,123 +1022,27 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
             
             # Handle different types of messages
             if update.message.text:
+                # For text messages, use regular send_message
                 await context.bot.send_message(
                     chat_id=int(partner_id),
                     text=update.message.text
                 )
-            elif update.message.voice:
-                try:
-                    # Method 1: Try direct forwarding
-                    await context.bot.forward_message(
-                        chat_id=int(partner_id),
-                        from_chat_id=update.effective_chat.id,
-                        message_id=update.message.message_id,
-                        disable_notification=True
-                    )
-                    logger.debug(f"Forwarded voice message from {user_id} to {partner_id}")
-                except Exception as e:
-                    logger.error(f"Error forwarding voice message, trying alternative method: {e}")
-                    try:
-                        # Method 2: Try with file_id
-                        await context.bot.send_voice(
-                            chat_id=int(partner_id),
-                            voice=update.message.voice.file_id,
-                            caption="Голосовое сообщение"
-                        )
-                        logger.debug(f"Sent voice message using file_id from {user_id} to {partner_id}")
-                    except Exception as e2:
-                        logger.error(f"Error sending voice with file_id, trying final method: {e2}")
-                        try:
-                            # Method 3: Get file and send
-                            voice_file = await update.message.voice.get_file()
-                            await context.bot.send_voice(
-                                chat_id=int(partner_id),
-                                voice=voice_file.file_id,
-                                duration=update.message.voice.duration
-                            )
-                            logger.debug(f"Sent voice message using get_file from {user_id} to {partner_id}")
-                        except Exception as e3:
-                            logger.error(f"All voice sending methods failed: {e3}", exc_info=True)
-                            await update.message.reply_text(
-                                "⚠️ Не удалось отправить голосовое сообщение. Попробуйте еще раз."
-                            )
-            elif update.message.video_note:
-                try:
-                    # Method 1: Try direct forwarding
-                    await context.bot.forward_message(
-                        chat_id=int(partner_id),
-                        from_chat_id=update.effective_chat.id,
-                        message_id=update.message.message_id,
-                        disable_notification=True
-                    )
-                    logger.debug(f"Forwarded video note from {user_id} to {partner_id}")
-                except Exception as e:
-                    logger.error(f"Error forwarding video note, trying alternative method: {e}")
-                    try:
-                        # Method 2: Try with file_id
-                        await context.bot.send_video_note(
-                            chat_id=int(partner_id),
-                            video_note=update.message.video_note.file_id
-                        )
-                        logger.debug(f"Sent video note using file_id from {user_id} to {partner_id}")
-                    except Exception as e2:
-                        logger.error(f"Error sending video note with file_id: {e2}", exc_info=True)
-                        await update.message.reply_text(
-                            "⚠️ Не удалось отправить видео-кружок. Попробуйте еще раз."
-                        )
-            elif update.message.photo:
-                # Get the largest photo (last in the list)
-                photo_file_id = update.message.photo[-1].file_id
-                await context.bot.send_photo(
-                    chat_id=int(partner_id),
-                    photo=photo_file_id,
-                    caption=update.message.caption if update.message.caption else None
-                )
-                logger.debug(f"Sent photo from {user_id} to {partner_id}")
-            elif update.message.sticker:
-                sticker_file_id = update.message.sticker.file_id
-                await context.bot.send_sticker(
-                    chat_id=int(partner_id),
-                    sticker=sticker_file_id
-                )
-                logger.debug(f"Sent sticker from {user_id} to {partner_id}")
-            elif update.message.animation:
-                animation_file_id = update.message.animation.file_id
-                await context.bot.send_animation(
-                    chat_id=int(partner_id),
-                    animation=animation_file_id,
-                    caption=update.message.caption if update.message.caption else None
-                )
-                logger.debug(f"Sent animation from {user_id} to {partner_id}")
-            elif update.message.document:
-                document_file_id = update.message.document.file_id
-                await context.bot.send_document(
-                    chat_id=int(partner_id),
-                    document=document_file_id,
-                    caption=update.message.caption if update.message.caption else None
-                )
-                logger.debug(f"Sent document from {user_id} to {partner_id}")
-            elif update.message.audio:
-                audio_file_id = update.message.audio.file_id
-                await context.bot.send_audio(
-                    chat_id=int(partner_id),
-                    audio=audio_file_id,
-                    caption=update.message.caption if update.message.caption else None
-                )
-                logger.debug(f"Sent audio from {user_id} to {partner_id}")
-            elif update.message.video:
-                video_file_id = update.message.video.file_id
-                await context.bot.send_video(
-                    chat_id=int(partner_id),
-                    video=video_file_id,
-                    caption=update.message.caption if update.message.caption else None
-                )
-                logger.debug(f"Sent video from {user_id} to {partner_id}")
             else:
-                # Unsupported message type
-                await update.message.reply_text(
-                    "⚠️ Этот тип сообщения не поддерживается."
-                )
+                # For all media messages, use forward_message
+                # This handles voice, video notes, photos, videos, stickers, etc.
+                try:
+                    await context.bot.forward_message(
+                        chat_id=int(partner_id),
+                        from_chat_id=update.effective_chat.id,
+                        message_id=update.message.message_id,
+                        disable_notification=True
+                    )
+                    logger.debug(f"Forwarded media message from {user_id} to {partner_id}")
+                except Exception as e:
+                    logger.error(f"Error forwarding media message: {e}", exc_info=True)
+                    await update.message.reply_text(
+                        "⚠️ Не удалось отправить медиа-сообщение. Попробуйте еще раз."
+                    )
             
             # Update typing status
             chat_stats[user_id].is_typing = False
