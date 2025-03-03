@@ -5,13 +5,18 @@ import sys
 import time
 import asyncio
 import datetime
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+import random
+from typing import Dict, Any, List, Optional
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, ReplyKeyboardMarkup, KeyboardButton
 from telegram.ext import Application, CommandHandler, CallbackQueryHandler, MessageHandler, filters, ContextTypes, ConversationHandler
+from dotenv import load_dotenv
+
+import database as db
 
 # Enable logging with more detailed level
 logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s", 
-    level=logging.DEBUG,  # Changed from INFO to DEBUG for more detailed logs
+    level=logging.INFO,  # Changed to INFO for production
     stream=sys.stdout  # Output to stdout for immediate visibility
 )
 logger = logging.getLogger(__name__)
@@ -38,6 +43,28 @@ def save_user_data(data):
 user_data = load_user_data()
 active_chats = {}  # Store active chat pairs
 searching_users = {}  # Store users who are currently searching
+
+# Load environment variables
+load_dotenv()
+TOKEN = os.getenv("TELEGRAM_TOKEN")
+
+# Constants for buttons
+FIND_PARTNER = "🔍 Найти собеседника"
+END_CHAT = "🚫 Завершить чат"
+MY_PROFILE = "👤 Мой профиль"
+HELP = "❓ Помощь"
+
+# Constants for callback data
+CALLBACK_RATE = "rate_"
+CALLBACK_GENDER = "gender_"
+CALLBACK_AGE = "age_"
+CALLBACK_INTEREST = "interest_"
+
+# Interests
+INTERESTS = [
+    "Музыка", "Кино", "Спорт", "Игры", "Книги", 
+    "Путешествия", "Технологии", "Искусство", "Наука", "Кулинария"
+]
 
 async def update_search_timer(context: ContextTypes.DEFAULT_TYPE) -> None:
     """Update the search timer message."""
@@ -113,18 +140,19 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
         
         # Create welcome message
         welcome_text = (
-            f"*Добро пожаловать в Dox: Анонимный Чат* 🎭\n\n"
-            f"Здесь вы можете анонимно общаться с другими пользователями.\n\n"
+            f"👋 Привет, {update.effective_user.first_name}!\n\n"
+            f"Добро пожаловать в Dox: Анонимный Чат!\n\n"
+            f"Здесь ты можешь анонимно общаться с другими пользователями. "
+            f"Используй кнопки ниже для навигации."
         )
         
         # Add user stats if they have any chats
         if chat_count > 0:
             welcome_text += (
-                f"*Ваша статистика:*\n"
                 f"📊 Количество чатов: {chat_count}\n"
             )
             if rating > 0:
-                welcome_text += f"📈 Ваш рейтинг: {rating_stars} ({rating:.1f}/5)\n"
+                welcome_text += f"📈 Рейтинг: {rating_stars} ({rating:.1f}/5)\n"
             welcome_text += "\n"
         
         welcome_text += "*Выберите действие:*"
@@ -203,23 +231,25 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     
     elif query.data == "help":
         help_text = (
-            "*Справка по использованию бота* ℹ️\n\n"
+            "🤖 *Dox: Анонимный Чат* - Помощь\n\n"
             "*Основные команды:*\n"
-            "/start - Начать использование бота\n"
-            "/help - Показать эту справку\n"
-            "/end - Завершить текущий чат\n\n"
-            
-            "*Как пользоваться ботом:*\n"
-            "1️⃣ Заполните свой профиль (пол, возраст, интересы)\n"
-            "2️⃣ Нажмите кнопку 'Найти собеседника'\n"
-            "3️⃣ Общайтесь анонимно с найденным собеседником\n"
-            "4️⃣ Используйте кнопку 'Пропустить', чтобы найти другого собеседника\n"
-            "5️⃣ После завершения чата оцените собеседника\n\n"
-            
-            "*Дополнительная информация:*\n"
-            "• Ваш рейтинг формируется на основе оценок собеседников\n"
-            "• Бот сохраняет количество проведенных вами чатов\n"
-            "• Вы можете в любой момент изменить информацию в своем профиле"
+            "• /start - Запустить бота\n"
+            "• /help - Показать это сообщение\n\n"
+            "*Кнопки:*\n"
+            "• 🔍 Найти собеседника - Начать поиск партнера для чата\n"
+            "• �� Завершить чат - Закончить текущий разговор\n"
+            "• 👤 Мой профиль - Просмотр и редактирование профиля\n"
+            "• ❓ Помощь - Показать это сообщение\n\n"
+            "*Как это работает:*\n"
+            "1. Заполните свой профиль (пол, возраст, интересы)\n"
+            "2. Нажмите 'Найти собеседника'\n"
+            "3. Бот подберет вам партнера для анонимного общения\n"
+            "4. После завершения чата вы можете оценить собеседника\n\n"
+            "*Правила:*\n"
+            "• Будьте вежливы и уважительны\n"
+            "• Не отправляйте спам или оскорбительный контент\n"
+            "• Не делитесь личной информацией\n\n"
+            "Приятного общения! 😊"
         )
         
         keyboard = [[InlineKeyboardButton("🔙 Назад", callback_data="back_to_start")]]
@@ -393,6 +423,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
             completed_fields += 1
         
         completion_percentage = int(completed_fields / total_fields * 100)
+        completion_bar = "▓" * (completion_percentage // 10) + "░" * (10 - completion_percentage // 10)
         
         await query.edit_message_text(
             text=f"*Ваши интересы обновлены!*\n\n"
@@ -491,7 +522,7 @@ async def show_profile(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
     completion_bar = "▓" * (completion_percentage // 10) + "░" * (10 - completion_percentage // 10)
     
     profile_text = (
-        f"*👤 Ваш профиль*\n\n"
+        f"👤 *Ваш профиль:*\n\n"
         f"*Заполнено:* {completion_percentage}% {completion_bar}\n\n"
         f"*Пол:* {gender}\n"
         f"*Возраст:* {age}\n"
@@ -916,7 +947,7 @@ def main() -> None:
         token = "8039344227:AAEDCP_902a3r52JIdM9REqUyPx-p2IVtxA"
         logger.info("Using token: %s", token)
         
-        # Build application with job queue
+        # Build application
         application = (
             Application.builder()
             .token(token)
@@ -952,9 +983,23 @@ def main() -> None:
         # Add error handler
         application.add_error_handler(error_handler)
         
-        # Start the Bot
-        logger.info("Starting polling...")
-        application.run_polling(allowed_updates=Update.ALL_TYPES, drop_pending_updates=True)
+        # Get environment variables for Railway
+        PORT = int(os.environ.get('PORT', '8443'))
+        RAILWAY_STATIC_URL = os.environ.get('RAILWAY_STATIC_URL', 'dox-production.up.railway.app')
+        
+        # Start the Bot with webhook if on Railway, otherwise use polling
+        if 'RAILWAY_STATIC_URL' in os.environ:
+            logger.info(f"Starting webhook on {RAILWAY_STATIC_URL}")
+            application.run_webhook(
+                listen="0.0.0.0",
+                port=PORT,
+                url_path=token,
+                webhook_url=f"https://{RAILWAY_STATIC_URL}/{token}"
+            )
+        else:
+            logger.info("Starting polling...")
+            application.run_polling(allowed_updates=Update.ALL_TYPES, drop_pending_updates=True)
+        
         logger.info("Bot stopped")
     except Exception as e:
         logger.critical("Fatal error starting bot: %s", str(e), exc_info=True)
