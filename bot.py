@@ -237,7 +237,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
             "• /help - Показать это сообщение\n\n"
             "*Кнопки:*\n"
             "• 🔍 Найти собеседника - Начать поиск партнера для чата\n"
-            "• �� Завершить чат - Закончить текущий разговор\n"
+            "• 🚫 Завершить чат - Закончить текущий разговор\n"
             "• 👤 Мой профиль - Просмотр и редактирование профиля\n"
             "• ❓ Помощь - Показать это сообщение\n\n"
             "*Как это работает:*\n"
@@ -708,15 +708,23 @@ async def continuous_search(user_id: str, context: ContextTypes.DEFAULT_TYPE) ->
                     [InlineKeyboardButton("❌ Завершить чат", callback_data="end_chat")]
                 ]
                 
-                # Send message to the user who initiated the search
+                # Send message to the user who initiated the search and pin it
                 try:
-                    await context.bot.edit_message_text(
+                    sent_message = await context.bot.edit_message_text(
                         chat_id=chat_id,
                         message_id=message_id,
                         text=f"✅ *Собеседник найден!*\n{time_text}\n\n{partner_text}\n\n*Начните общение прямо сейчас!*",
                         parse_mode="Markdown",
                         reply_markup=InlineKeyboardMarkup(keyboard)
                     )
+                    # Pin the message
+                    await context.bot.pin_chat_message(
+                        chat_id=chat_id,
+                        message_id=message_id,
+                        disable_notification=True
+                    )
+                    # Store pinned message info
+                    context.user_data["pinned_message_id"] = message_id
                 except Exception as e:
                     logger.error(f"Error sending match notification to user: {e}")
                     return
@@ -740,14 +748,22 @@ async def continuous_search(user_id: str, context: ContextTypes.DEFAULT_TYPE) ->
                         interests_text += "• 💬 Общение\n"
                     partner_text += f"*Интересы:*\n{interests_text}"
                 
-                # Send message to the partner
+                # Send message to the partner and pin it
                 try:
-                    await context.bot.send_message(
+                    partner_message = await context.bot.send_message(
                         chat_id=int(partner_id),
                         text=f"✅ *Собеседник найден!*\n\n{partner_text}\n\n*Начните общение прямо сейчас!*",
                         parse_mode="Markdown",
                         reply_markup=InlineKeyboardMarkup(keyboard)
                     )
+                    # Pin the message for partner
+                    await context.bot.pin_chat_message(
+                        chat_id=int(partner_id),
+                        message_id=partner_message.message_id,
+                        disable_notification=True
+                    )
+                    # Store pinned message info for partner
+                    context.user_data[f"partner_{partner_id}_pinned_message"] = partner_message.message_id
                     logger.debug(f"Successfully notified partner {partner_id}")
                 except Exception as e:
                     logger.error(f"Error notifying partner: {e}")
@@ -924,9 +940,31 @@ async def end_chat(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
         # Store last partner for rating
         context.user_data["last_partner"] = partner_id
         
-        # Notify partner that chat has ended
+        # Unpin the message for both users
+        try:
+            # Unpin message for current user
+            pinned_message_id = context.user_data.get("pinned_message_id")
+            if pinned_message_id:
+                await context.bot.unpin_chat_message(
+                    chat_id=update.effective_chat.id,
+                    message_id=pinned_message_id
+                )
+                del context.user_data["pinned_message_id"]
+        except Exception as e:
+            logger.error(f"Error unpinning message for user: {e}")
+
+        # Notify partner that chat has ended and unpin their message
         if partner_id in active_chats:
             try:
+                # Unpin message for partner
+                partner_pinned_message = context.user_data.get(f"partner_{partner_id}_pinned_message")
+                if partner_pinned_message:
+                    await context.bot.unpin_chat_message(
+                        chat_id=int(partner_id),
+                        message_id=partner_pinned_message
+                    )
+                    del context.user_data[f"partner_{partner_id}_pinned_message"]
+
                 await context.bot.send_message(
                     chat_id=int(partner_id),
                     text="❌ *Собеседник покинул чат*\n\nВыберите действие:",
