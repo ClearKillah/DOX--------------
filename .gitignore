@@ -23,6 +23,7 @@ var/
 # Virtual Environment
 venv/
 ENV/
+.env
 
 # User data
 user_data.json
