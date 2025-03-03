@@ -7,7 +7,7 @@ import asyncio
 import datetime
 import random
 from typing import Dict, Any, List, Optional
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, ReplyKeyboardMarkup, KeyboardButton
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, ReplyKeyboardMarkup, KeyboardButton, InputFile
 from telegram.ext import Application, CommandHandler, CallbackQueryHandler, MessageHandler, filters, ContextTypes, ConversationHandler
 from dotenv import load_dotenv
 import telegram
@@ -917,7 +917,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
                     text=update.message.text
                 )
             elif update.message.voice:
-                # For voice messages, always use the download and send approach to guarantee anonymity
+                # For voice messages, use a completely different approach to guarantee anonymity
                 try:
                     # First, notify the partner that voice is being processed
                     await context.bot.send_chat_action(
@@ -932,7 +932,10 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
                     
                     # Create temporary directory if it doesn't exist
                     os.makedirs("temp", exist_ok=True)
-                    temp_file_path = f"temp/voice_{user_id}_{int(time.time())}.ogg"
+                    
+                    # Generate unique filenames
+                    timestamp = int(time.time())
+                    temp_file_path = f"temp/voice_{user_id}_{timestamp}.ogg"
                     
                     # Get the voice file
                     voice_file = await context.bot.get_file(voice_file_id)
@@ -943,9 +946,13 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
                     
                     # Send as a new voice message using file path
                     with open(temp_file_path, "rb") as voice_file:
+                        # Create an InputFile object which creates a fresh upload
+                        input_file = InputFile(voice_file)
+                        
+                        # Send the voice message
                         sent = await context.bot.send_voice(
                             chat_id=int(partner_id),
-                            voice=voice_file,  # Using the file directly, not the file_id
+                            voice=input_file,  # Using InputFile to ensure a fresh upload
                             duration=voice_duration,
                             caption=update.message.caption if update.message.caption else None
                         )
@@ -981,7 +988,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
                         "⚠️ Не удалось отправить голосовое сообщение. Попробуйте еще раз или используйте текстовые сообщения."
                     )
             elif update.message.video_note:
-                # For video notes, always use the download and send approach to guarantee anonymity
+                # For video notes, use InputFile to guarantee anonymity
                 try:
                     # First, notify the partner that video note is being processed
                     await context.bot.send_chat_action(
@@ -998,7 +1005,10 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
                     
                     # Create temporary directory if it doesn't exist
                     os.makedirs("temp", exist_ok=True)
-                    temp_file_path = f"temp/videonote_{user_id}_{int(time.time())}.mp4"
+                    
+                    # Generate unique filename
+                    timestamp = int(time.time())
+                    temp_file_path = f"temp/videonote_{user_id}_{timestamp}.mp4"
                     
                     # Get the file
                     video_note_file = await context.bot.get_file(video_note_file_id)
@@ -1008,9 +1018,12 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
                     
                     # Send as a new video note
                     with open(temp_file_path, "rb") as video_note_file:
+                        # Create an InputFile object which creates a fresh upload
+                        input_file = InputFile(video_note_file)
+                        
                         sent = await context.bot.send_video_note(
                             chat_id=int(partner_id),
-                            video_note=video_note_file,
+                            video_note=input_file,  # Using InputFile to ensure a fresh upload
                             length=video_note_length,
                             duration=video_note_duration
                         )
@@ -1033,7 +1046,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
                     )
                     
             elif update.message.photo:
-                # For photos, always use the download and send approach to guarantee anonymity
+                # For photos, use InputFile to guarantee anonymity
                 try:
                     # Get the largest photo (best quality)
                     photo = update.message.photo[-1]
@@ -1044,7 +1057,10 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
                     
                     # Create temporary directory if it doesn't exist
                     os.makedirs("temp", exist_ok=True)
-                    temp_file_path = f"temp/photo_{user_id}_{int(time.time())}.jpg"
+                    
+                    # Generate unique filename
+                    timestamp = int(time.time())
+                    temp_file_path = f"temp/photo_{user_id}_{timestamp}.jpg"
                     
                     # Get the file
                     photo_file = await context.bot.get_file(photo_file_id)
@@ -1054,9 +1070,12 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
                     
                     # Send as a new photo
                     with open(temp_file_path, "rb") as photo_file:
+                        # Create an InputFile object which creates a fresh upload
+                        input_file = InputFile(photo_file)
+                        
                         sent = await context.bot.send_photo(
                             chat_id=int(partner_id),
-                            photo=photo_file,
+                            photo=input_file,  # Using InputFile to ensure a fresh upload
                             caption=caption
                         )
                     
@@ -1078,7 +1097,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
                     )
                     
             elif update.message.video:
-                # For videos, always use the download and send approach to guarantee anonymity
+                # For videos, use InputFile to guarantee anonymity
                 try:
                     # Get video details
                     video_file_id = update.message.video.file_id
@@ -1091,7 +1110,10 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
                     
                     # Create temporary directory if it doesn't exist
                     os.makedirs("temp", exist_ok=True)
-                    temp_file_path = f"temp/video_{user_id}_{int(time.time())}.mp4"
+                    
+                    # Generate unique filename
+                    timestamp = int(time.time())
+                    temp_file_path = f"temp/video_{user_id}_{timestamp}.mp4"
                     
                     # Get the file
                     video_file = await context.bot.get_file(video_file_id)
@@ -1101,9 +1123,12 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
                     
                     # Send as a new video
                     with open(temp_file_path, "rb") as video_file:
+                        # Create an InputFile object which creates a fresh upload
+                        input_file = InputFile(video_file)
+                        
                         sent = await context.bot.send_video(
                             chat_id=int(partner_id),
-                            video=video_file,
+                            video=input_file,  # Using InputFile to ensure a fresh upload
                             duration=video_duration,
                             width=video_width,
                             height=video_height,
@@ -1126,19 +1151,216 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
                     await update.message.reply_text(
                         "⚠️ Не удалось отправить видео. Попробуйте еще раз."
                     )
-            elif update.message.sticker or update.message.animation or update.message.document or update.message.audio:
-                # For other media types, use copy_message
+                    
+            elif update.message.sticker:
+                # For stickers, use InputFile to guarantee anonymity
                 try:
-                    await context.bot.copy_message(
-                        chat_id=int(partner_id),
-                        from_chat_id=update.effective_chat.id,
-                        message_id=update.message.message_id
-                    )
-                    logger.debug(f"Copied media from {user_id} to {partner_id}")
+                    # Get sticker details
+                    sticker_file_id = update.message.sticker.file_id
+                    
+                    logger.info(f"Processing sticker from {user_id} to {partner_id}: file_id={sticker_file_id}")
+                    
+                    # Create temporary directory if it doesn't exist
+                    os.makedirs("temp", exist_ok=True)
+                    
+                    # Generate unique filename
+                    timestamp = int(time.time())
+                    temp_file_path = f"temp/sticker_{user_id}_{timestamp}.webp"
+                    
+                    # Get the file
+                    sticker_file = await context.bot.get_file(sticker_file_id)
+                    
+                    # Download to temporary file
+                    await sticker_file.download_to_drive(temp_file_path)
+                    
+                    # Send as a new sticker
+                    with open(temp_file_path, "rb") as sticker_file:
+                        # Create an InputFile object which creates a fresh upload
+                        input_file = InputFile(sticker_file)
+                        
+                        sent = await context.bot.send_sticker(
+                            chat_id=int(partner_id),
+                            sticker=input_file  # Using InputFile to ensure a fresh upload
+                        )
+                    
+                    # Clean up temporary file
+                    try:
+                        os.remove(temp_file_path)
+                        logger.info(f"Removed temporary file {temp_file_path}")
+                    except Exception as e:
+                        logger.warning(f"Failed to remove temporary file {temp_file_path}: {e}")
+                    
+                    if sent:
+                        logger.info(f"Successfully sent sticker from {user_id} to {partner_id}")
+                        return CHATTING
+                    
                 except Exception as e:
-                    logger.error(f"Error copying media: {e}", exc_info=True)
+                    logger.error(f"Error sending sticker: {e}", exc_info=True)
                     await update.message.reply_text(
-                        "⚠️ Не удалось отправить медиа-файл. Попробуйте еще раз."
+                        "⚠️ Не удалось отправить стикер. Попробуйте еще раз."
+                    )
+                    
+            elif update.message.document:
+                # For documents, use InputFile to guarantee anonymity
+                try:
+                    # Get document details
+                    document_file_id = update.message.document.file_id
+                    document_filename = update.message.document.file_name
+                    caption = update.message.caption
+                    
+                    logger.info(f"Processing document from {user_id} to {partner_id}: file_id={document_file_id}, filename={document_filename}")
+                    
+                    # Create temporary directory if it doesn't exist
+                    os.makedirs("temp", exist_ok=True)
+                    
+                    # Generate unique filename but preserve extension
+                    timestamp = int(time.time())
+                    file_ext = os.path.splitext(document_filename)[1] if document_filename else ""
+                    temp_file_path = f"temp/document_{user_id}_{timestamp}{file_ext}"
+                    
+                    # Get the file
+                    document_file = await context.bot.get_file(document_file_id)
+                    
+                    # Download to temporary file
+                    await document_file.download_to_drive(temp_file_path)
+                    
+                    # Send as a new document
+                    with open(temp_file_path, "rb") as document_file:
+                        # Create an InputFile object which creates a fresh upload
+                        input_file = InputFile(document_file, filename=document_filename)
+                        
+                        sent = await context.bot.send_document(
+                            chat_id=int(partner_id),
+                            document=input_file,  # Using InputFile to ensure a fresh upload
+                            caption=caption
+                        )
+                    
+                    # Clean up temporary file
+                    try:
+                        os.remove(temp_file_path)
+                        logger.info(f"Removed temporary file {temp_file_path}")
+                    except Exception as e:
+                        logger.warning(f"Failed to remove temporary file {temp_file_path}: {e}")
+                    
+                    if sent:
+                        logger.info(f"Successfully sent document from {user_id} to {partner_id}")
+                        return CHATTING
+                    
+                except Exception as e:
+                    logger.error(f"Error sending document: {e}", exc_info=True)
+                    await update.message.reply_text(
+                        "⚠️ Не удалось отправить файл. Попробуйте еще раз."
+                    )
+            elif update.message.animation:
+                # For animations (GIFs), use InputFile to guarantee anonymity
+                try:
+                    # Get animation details
+                    animation_file_id = update.message.animation.file_id
+                    animation_duration = update.message.animation.duration
+                    animation_width = update.message.animation.width
+                    animation_height = update.message.animation.height
+                    caption = update.message.caption
+                    
+                    logger.info(f"Processing animation from {user_id} to {partner_id}: file_id={animation_file_id}")
+                    
+                    # Create temporary directory if it doesn't exist
+                    os.makedirs("temp", exist_ok=True)
+                    
+                    # Generate unique filename
+                    timestamp = int(time.time())
+                    temp_file_path = f"temp/animation_{user_id}_{timestamp}.mp4"
+                    
+                    # Get the file
+                    animation_file = await context.bot.get_file(animation_file_id)
+                    
+                    # Download to temporary file
+                    await animation_file.download_to_drive(temp_file_path)
+                    
+                    # Send as a new animation
+                    with open(temp_file_path, "rb") as animation_file:
+                        # Create an InputFile object which creates a fresh upload
+                        input_file = InputFile(animation_file)
+                        
+                        sent = await context.bot.send_animation(
+                            chat_id=int(partner_id),
+                            animation=input_file,  # Using InputFile to ensure a fresh upload
+                            duration=animation_duration,
+                            width=animation_width,
+                            height=animation_height,
+                            caption=caption
+                        )
+                    
+                    # Clean up temporary file
+                    try:
+                        os.remove(temp_file_path)
+                        logger.info(f"Removed temporary file {temp_file_path}")
+                    except Exception as e:
+                        logger.warning(f"Failed to remove temporary file {temp_file_path}: {e}")
+                    
+                    if sent:
+                        logger.info(f"Successfully sent animation from {user_id} to {partner_id}")
+                        return CHATTING
+                    
+                except Exception as e:
+                    logger.error(f"Error sending animation: {e}", exc_info=True)
+                    await update.message.reply_text(
+                        "⚠️ Не удалось отправить GIF. Попробуйте еще раз."
+                    )
+                    
+            elif update.message.audio:
+                # For audio files, use InputFile to guarantee anonymity
+                try:
+                    # Get audio details
+                    audio_file_id = update.message.audio.file_id
+                    audio_duration = update.message.audio.duration
+                    audio_performer = update.message.audio.performer
+                    audio_title = update.message.audio.title
+                    caption = update.message.caption
+                    
+                    logger.info(f"Processing audio from {user_id} to {partner_id}: file_id={audio_file_id}")
+                    
+                    # Create temporary directory if it doesn't exist
+                    os.makedirs("temp", exist_ok=True)
+                    
+                    # Generate unique filename
+                    timestamp = int(time.time())
+                    temp_file_path = f"temp/audio_{user_id}_{timestamp}.mp3"
+                    
+                    # Get the file
+                    audio_file = await context.bot.get_file(audio_file_id)
+                    
+                    # Download to temporary file
+                    await audio_file.download_to_drive(temp_file_path)
+                    
+                    # Send as a new audio file
+                    with open(temp_file_path, "rb") as audio_file:
+                        # Create an InputFile object which creates a fresh upload
+                        input_file = InputFile(audio_file)
+                        
+                        sent = await context.bot.send_audio(
+                            chat_id=int(partner_id),
+                            audio=input_file,  # Using InputFile to ensure a fresh upload
+                            duration=audio_duration,
+                            performer=audio_performer,
+                            title=audio_title,
+                            caption=caption
+                        )
+                    
+                    # Clean up temporary file
+                    try:
+                        os.remove(temp_file_path)
+                        logger.info(f"Removed temporary file {temp_file_path}")
+                    except Exception as e:
+                        logger.warning(f"Failed to remove temporary file {temp_file_path}: {e}")
+                    
+                    if sent:
+                        logger.info(f"Successfully sent audio from {user_id} to {partner_id}")
+                        return CHATTING
+                    
+                except Exception as e:
+                    logger.error(f"Error sending audio: {e}", exc_info=True)
+                    await update.message.reply_text(
+                        "⚠️ Не удалось отправить аудио. Попробуйте еще раз."
                     )
             else:
                 # Unsupported message type
