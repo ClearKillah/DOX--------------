@@ -999,16 +999,68 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
                     text=update.message.text
                 )
             elif update.message.voice:
-                voice = await update.message.voice.get_file()
+                # Get the file ID directly
+                file_id = update.message.voice.file_id
                 await context.bot.send_voice(
                     chat_id=int(partner_id),
-                    voice=voice.file_id
+                    voice=file_id
                 )
+                logger.debug(f"Sent voice message from {user_id} to {partner_id}")
             elif update.message.video_note:
-                video_note = await update.message.video_note.get_file()
+                # Get the file ID directly
+                file_id = update.message.video_note.file_id
                 await context.bot.send_video_note(
                     chat_id=int(partner_id),
-                    video_note=video_note.file_id
+                    video_note=file_id
+                )
+                logger.debug(f"Sent video note from {user_id} to {partner_id}")
+            elif update.message.photo:
+                # Get the largest photo (last in the list)
+                photo_file_id = update.message.photo[-1].file_id
+                await context.bot.send_photo(
+                    chat_id=int(partner_id),
+                    photo=photo_file_id
+                )
+                logger.debug(f"Sent photo from {user_id} to {partner_id}")
+            elif update.message.sticker:
+                sticker_file_id = update.message.sticker.file_id
+                await context.bot.send_sticker(
+                    chat_id=int(partner_id),
+                    sticker=sticker_file_id
+                )
+                logger.debug(f"Sent sticker from {user_id} to {partner_id}")
+            elif update.message.animation:
+                animation_file_id = update.message.animation.file_id
+                await context.bot.send_animation(
+                    chat_id=int(partner_id),
+                    animation=animation_file_id
+                )
+                logger.debug(f"Sent animation from {user_id} to {partner_id}")
+            elif update.message.document:
+                document_file_id = update.message.document.file_id
+                await context.bot.send_document(
+                    chat_id=int(partner_id),
+                    document=document_file_id
+                )
+                logger.debug(f"Sent document from {user_id} to {partner_id}")
+            elif update.message.audio:
+                audio_file_id = update.message.audio.file_id
+                await context.bot.send_audio(
+                    chat_id=int(partner_id),
+                    audio=audio_file_id
+                )
+                logger.debug(f"Sent audio from {user_id} to {partner_id}")
+            elif update.message.video:
+                video_file_id = update.message.video.file_id
+                await context.bot.send_video(
+                    chat_id=int(partner_id),
+                    video=video_file_id
+                )
+                logger.debug(f"Sent video from {user_id} to {partner_id}")
+            else:
+                # Unsupported message type
+                await update.message.reply_text(
+                    "⚠️ Этот тип сообщения не поддерживается."
                 )
             
             # Update typing status
@@ -1018,7 +1070,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
             return CHATTING
             
         except Exception as e:
-            logger.error(f"Error forwarding message: {e}")
+            logger.error(f"Error forwarding message: {e}", exc_info=True)
             
             # If we can't message the partner, end the chat
             if user_id in active_chats:
