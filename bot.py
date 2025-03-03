@@ -917,7 +917,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
                     text=update.message.text
                 )
             elif update.message.voice:
-                # For voice messages, try direct forwarding first (simplest approach)
+                # For voice messages, always use the download and send approach to guarantee anonymity
                 try:
                     # First, notify the partner that voice is being processed
                     await context.bot.send_chat_action(
@@ -930,84 +930,45 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
                     voice_duration = update.message.voice.duration
                     logger.info(f"Processing voice message from {user_id} to {partner_id}: file_id={voice_file_id}, duration={voice_duration}s")
                     
-                    # Try to forward the message directly with protect_content=True to hide sender info
-                    forwarded = await context.bot.forward_message(
-                        chat_id=int(partner_id),
-                        from_chat_id=update.effective_chat.id,
-                        message_id=update.message.message_id,
-                        protect_content=True  # This hides the sender's name
-                    )
+                    # Create temporary directory if it doesn't exist
+                    os.makedirs("temp", exist_ok=True)
+                    temp_file_path = f"temp/voice_{user_id}_{int(time.time())}.ogg"
                     
-                    if forwarded:
-                        logger.info(f"Successfully forwarded voice message from {user_id} to {partner_id}")
-                        return CHATTING
-                        
-                except telegram.error.BadRequest as e:
-                    logger.error(f"BadRequest error forwarding voice message: {e}", exc_info=True)
+                    # Get the voice file
+                    voice_file = await context.bot.get_file(voice_file_id)
                     
-                    # If forwarding with protect_content fails or still shows username, use the download and send method
-                    try:
-                        logger.info("Attempting alternative method - download and send using file_id")
-                        
-                        # Send directly using the file_id (this doesn't show the sender's username)
+                    # Download to temporary file
+                    await voice_file.download_to_drive(temp_file_path)
+                    logger.info(f"Downloaded voice message to {temp_file_path}")
+                    
+                    # Send as a new voice message using file path
+                    with open(temp_file_path, "rb") as voice_file:
                         sent = await context.bot.send_voice(
                             chat_id=int(partner_id),
-                            voice=voice_file_id,  # Using file_id directly instead of forwarding
+                            voice=voice_file,  # Using the file directly, not the file_id
                             duration=voice_duration,
                             caption=update.message.caption if update.message.caption else None
                         )
-                        
-                        if sent:
-                            logger.info(f"Successfully sent voice message using file_id method")
-                            return CHATTING
-                            
-                    except Exception as inner_e:
-                        logger.error(f"File ID method failed: {inner_e}", exc_info=True)
-                        
-                        # Try second fallback - temporary file method
-                        try:
-                            logger.info("Attempting second fallback method - download and send using temporary file")
-                            
-                            # Create temporary directory if it doesn't exist
-                            os.makedirs("temp", exist_ok=True)
-                            temp_file_path = f"temp/voice_{user_id}_{int(time.time())}.ogg"
-                            
-                            # Get the voice file
-                            voice_file = await context.bot.get_file(voice_file_id)
-                            
-                            # Download to temporary file
-                            await voice_file.download_to_drive(temp_file_path)
-                            logger.info(f"Downloaded voice message to {temp_file_path}")
-                            
-                            # Send as a new voice message using file path
-                            with open(temp_file_path, "rb") as voice_file:
-                                sent = await context.bot.send_voice(
-                                    chat_id=int(partner_id),
-                                    voice=voice_file,
-                                    duration=voice_duration,
-                                    caption=update.message.caption if update.message.caption else None
-                                )
-                            
-                            # Clean up temporary file
-                            try:
-                                os.remove(temp_file_path)
-                                logger.info(f"Removed temporary file {temp_file_path}")
-                            except Exception as e:
-                                logger.warning(f"Failed to remove temporary file {temp_file_path}: {e}")
-                            
-                            if sent:
-                                logger.info(f"Successfully sent voice message using temporary file method")
-                                return CHATTING
-                                
-                        except Exception as inner_e:
-                            logger.error(f"Temporary file method also failed: {inner_e}", exc_info=True)
                     
+                    # Clean up temporary file
+                    try:
+                        os.remove(temp_file_path)
+                        logger.info(f"Removed temporary file {temp_file_path}")
+                    except Exception as e:
+                        logger.warning(f"Failed to remove temporary file {temp_file_path}: {e}")
+                    
+                    if sent:
+                        logger.info(f"Successfully sent voice message from {user_id} to {partner_id}")
+                        return CHATTING
+                    
+                except telegram.error.BadRequest as e:
+                    logger.error(f"BadRequest error sending voice message: {e}", exc_info=True)
                     await update.message.reply_text(
                         "⚠️ Не удалось отправить голосовое сообщение из-за ошибки Telegram. Попробуйте еще раз."
                     )
                     
                 except telegram.error.Unauthorized as e:
-                    logger.error(f"Unauthorized error forwarding voice message: {e}", exc_info=True)
+                    logger.error(f"Unauthorized error sending voice message: {e}", exc_info=True)
                     await update.message.reply_text(
                         "⚠️ Не удалось отправить голосовое сообщение. Возможно, собеседник заблокировал бота."
                     )
@@ -1015,32 +976,12 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
                     return await end_chat(update, context)
                     
                 except Exception as e:
-                    logger.error(f"Error forwarding voice message: {e}", exc_info=True)
-                    
-                    # Try alternative method - send using file_id
-                    try:
-                        logger.info("Attempting alternative method - send using file_id")
-                        
-                        # Send directly using the file_id (this doesn't show the sender's username)
-                        sent = await context.bot.send_voice(
-                            chat_id=int(partner_id),
-                            voice=voice_file_id,  # Using file_id directly instead of forwarding
-                            duration=voice_duration,
-                            caption=update.message.caption if update.message.caption else None
-                        )
-                        
-                        if sent:
-                            logger.info(f"Successfully sent voice message using file_id method")
-                            return CHATTING
-                            
-                    except Exception as inner_e:
-                        logger.error(f"Alternative method also failed: {inner_e}", exc_info=True)
-                        
+                    logger.error(f"Error sending voice message: {e}", exc_info=True)
                     await update.message.reply_text(
                         "⚠️ Не удалось отправить голосовое сообщение. Попробуйте еще раз или используйте текстовые сообщения."
                     )
             elif update.message.video_note:
-                # For video notes (circles), try direct sending with file_id first
+                # For video notes, always use the download and send approach to guarantee anonymity
                 try:
                     # First, notify the partner that video note is being processed
                     await context.bot.send_chat_action(
@@ -1048,70 +989,51 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
                         action="record_video_note"
                     )
                     
-                    # Get the video note file details for logging
+                    # Get the video note file details
                     video_note_file_id = update.message.video_note.file_id
                     video_note_length = update.message.video_note.length
                     video_note_duration = update.message.video_note.duration
                     
                     logger.info(f"Processing video note from {user_id} to {partner_id}: file_id={video_note_file_id}")
                     
-                    # Send directly using the file_id (this doesn't show the sender's username)
-                    sent = await context.bot.send_video_note(
-                        chat_id=int(partner_id),
-                        video_note=video_note_file_id,  # Using file_id directly
-                        length=video_note_length,
-                        duration=video_note_duration
-                    )
+                    # Create temporary directory if it doesn't exist
+                    os.makedirs("temp", exist_ok=True)
+                    temp_file_path = f"temp/videonote_{user_id}_{int(time.time())}.mp4"
+                    
+                    # Get the file
+                    video_note_file = await context.bot.get_file(video_note_file_id)
+                    
+                    # Download to temporary file
+                    await video_note_file.download_to_drive(temp_file_path)
+                    
+                    # Send as a new video note
+                    with open(temp_file_path, "rb") as video_note_file:
+                        sent = await context.bot.send_video_note(
+                            chat_id=int(partner_id),
+                            video_note=video_note_file,
+                            length=video_note_length,
+                            duration=video_note_duration
+                        )
+                    
+                    # Clean up temporary file
+                    try:
+                        os.remove(temp_file_path)
+                        logger.info(f"Removed temporary file {temp_file_path}")
+                    except Exception as e:
+                        logger.warning(f"Failed to remove temporary file {temp_file_path}: {e}")
                     
                     if sent:
-                        logger.info(f"Successfully sent video note using file_id method")
+                        logger.info(f"Successfully sent video note from {user_id} to {partner_id}")
                         return CHATTING
-                        
+                    
                 except Exception as e:
-                    logger.error(f"Error sending video note with file_id: {e}", exc_info=True)
-                    
-                    # Try fallback method - temporary file
-                    try:
-                        logger.info("Attempting fallback method for video note - temporary file")
-                        
-                        # Create temporary directory if it doesn't exist
-                        os.makedirs("temp", exist_ok=True)
-                        temp_file_path = f"temp/videonote_{user_id}_{int(time.time())}.mp4"
-                        
-                        # Get the file
-                        video_note_file = await context.bot.get_file(video_note_file_id)
-                        
-                        # Download to temporary file
-                        await video_note_file.download_to_drive(temp_file_path)
-                        
-                        # Send as a new video note
-                        with open(temp_file_path, "rb") as video_note_file:
-                            sent = await context.bot.send_video_note(
-                                chat_id=int(partner_id),
-                                video_note=video_note_file,
-                                length=video_note_length,
-                                duration=video_note_duration
-                            )
-                        
-                        # Clean up temporary file
-                        try:
-                            os.remove(temp_file_path)
-                        except Exception as e:
-                            logger.warning(f"Failed to remove temporary file {temp_file_path}: {e}")
-                        
-                        if sent:
-                            logger.info(f"Successfully sent video note using temporary file method")
-                            return CHATTING
-                            
-                    except Exception as inner_e:
-                        logger.error(f"Fallback method for video note also failed: {inner_e}", exc_info=True)
-                    
+                    logger.error(f"Error sending video note: {e}", exc_info=True)
                     await update.message.reply_text(
                         "⚠️ Не удалось отправить видео-кружок. Попробуйте еще раз."
                     )
                     
             elif update.message.photo:
-                # For photos, send using file_id directly
+                # For photos, always use the download and send approach to guarantee anonymity
                 try:
                     # Get the largest photo (best quality)
                     photo = update.message.photo[-1]
@@ -1120,61 +1042,43 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
                     
                     logger.info(f"Processing photo from {user_id} to {partner_id}: file_id={photo_file_id}")
                     
-                    # Send directly using the file_id (this doesn't show the sender's username)
-                    sent = await context.bot.send_photo(
-                        chat_id=int(partner_id),
-                        photo=photo_file_id,  # Using file_id directly
-                        caption=caption
-                    )
+                    # Create temporary directory if it doesn't exist
+                    os.makedirs("temp", exist_ok=True)
+                    temp_file_path = f"temp/photo_{user_id}_{int(time.time())}.jpg"
+                    
+                    # Get the file
+                    photo_file = await context.bot.get_file(photo_file_id)
+                    
+                    # Download to temporary file
+                    await photo_file.download_to_drive(temp_file_path)
+                    
+                    # Send as a new photo
+                    with open(temp_file_path, "rb") as photo_file:
+                        sent = await context.bot.send_photo(
+                            chat_id=int(partner_id),
+                            photo=photo_file,
+                            caption=caption
+                        )
+                    
+                    # Clean up temporary file
+                    try:
+                        os.remove(temp_file_path)
+                        logger.info(f"Removed temporary file {temp_file_path}")
+                    except Exception as e:
+                        logger.warning(f"Failed to remove temporary file {temp_file_path}: {e}")
                     
                     if sent:
-                        logger.info(f"Successfully sent photo using file_id method")
+                        logger.info(f"Successfully sent photo from {user_id} to {partner_id}")
                         return CHATTING
-                        
+                    
                 except Exception as e:
-                    logger.error(f"Error sending photo with file_id: {e}", exc_info=True)
-                    
-                    # Try fallback method - temporary file
-                    try:
-                        logger.info("Attempting fallback method for photo - temporary file")
-                        
-                        # Create temporary directory if it doesn't exist
-                        os.makedirs("temp", exist_ok=True)
-                        temp_file_path = f"temp/photo_{user_id}_{int(time.time())}.jpg"
-                        
-                        # Get the file
-                        photo_file = await context.bot.get_file(photo_file_id)
-                        
-                        # Download to temporary file
-                        await photo_file.download_to_drive(temp_file_path)
-                        
-                        # Send as a new photo
-                        with open(temp_file_path, "rb") as photo_file:
-                            sent = await context.bot.send_photo(
-                                chat_id=int(partner_id),
-                                photo=photo_file,
-                                caption=caption
-                            )
-                        
-                        # Clean up temporary file
-                        try:
-                            os.remove(temp_file_path)
-                        except Exception as e:
-                            logger.warning(f"Failed to remove temporary file {temp_file_path}: {e}")
-                        
-                        if sent:
-                            logger.info(f"Successfully sent photo using temporary file method")
-                            return CHATTING
-                            
-                    except Exception as inner_e:
-                        logger.error(f"Fallback method for photo also failed: {inner_e}", exc_info=True)
-                    
+                    logger.error(f"Error sending photo: {e}", exc_info=True)
                     await update.message.reply_text(
                         "⚠️ Не удалось отправить фото. Попробуйте еще раз."
                     )
                     
             elif update.message.video:
-                # For videos, send using file_id directly
+                # For videos, always use the download and send approach to guarantee anonymity
                 try:
                     # Get video details
                     video_file_id = update.message.video.file_id
@@ -1185,61 +1089,40 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
                     
                     logger.info(f"Processing video from {user_id} to {partner_id}: file_id={video_file_id}")
                     
-                    # Send directly using the file_id (this doesn't show the sender's username)
-                    sent = await context.bot.send_video(
-                        chat_id=int(partner_id),
-                        video=video_file_id,  # Using file_id directly
-                        duration=video_duration,
-                        width=video_width,
-                        height=video_height,
-                        caption=caption
-                    )
+                    # Create temporary directory if it doesn't exist
+                    os.makedirs("temp", exist_ok=True)
+                    temp_file_path = f"temp/video_{user_id}_{int(time.time())}.mp4"
+                    
+                    # Get the file
+                    video_file = await context.bot.get_file(video_file_id)
+                    
+                    # Download to temporary file
+                    await video_file.download_to_drive(temp_file_path)
+                    
+                    # Send as a new video
+                    with open(temp_file_path, "rb") as video_file:
+                        sent = await context.bot.send_video(
+                            chat_id=int(partner_id),
+                            video=video_file,
+                            duration=video_duration,
+                            width=video_width,
+                            height=video_height,
+                            caption=caption
+                        )
+                    
+                    # Clean up temporary file
+                    try:
+                        os.remove(temp_file_path)
+                        logger.info(f"Removed temporary file {temp_file_path}")
+                    except Exception as e:
+                        logger.warning(f"Failed to remove temporary file {temp_file_path}: {e}")
                     
                     if sent:
-                        logger.info(f"Successfully sent video using file_id method")
+                        logger.info(f"Successfully sent video from {user_id} to {partner_id}")
                         return CHATTING
-                        
+                    
                 except Exception as e:
-                    logger.error(f"Error sending video with file_id: {e}", exc_info=True)
-                    
-                    # Try fallback method - temporary file
-                    try:
-                        logger.info("Attempting fallback method for video - temporary file")
-                        
-                        # Create temporary directory if it doesn't exist
-                        os.makedirs("temp", exist_ok=True)
-                        temp_file_path = f"temp/video_{user_id}_{int(time.time())}.mp4"
-                        
-                        # Get the file
-                        video_file = await context.bot.get_file(video_file_id)
-                        
-                        # Download to temporary file
-                        await video_file.download_to_drive(temp_file_path)
-                        
-                        # Send as a new video
-                        with open(temp_file_path, "rb") as video_file:
-                            sent = await context.bot.send_video(
-                                chat_id=int(partner_id),
-                                video=video_file,
-                                duration=video_duration,
-                                width=video_width,
-                                height=video_height,
-                                caption=caption
-                            )
-                        
-                        # Clean up temporary file
-                        try:
-                            os.remove(temp_file_path)
-                        except Exception as e:
-                            logger.warning(f"Failed to remove temporary file {temp_file_path}: {e}")
-                        
-                        if sent:
-                            logger.info(f"Successfully sent video using temporary file method")
-                            return CHATTING
-                            
-                    except Exception as inner_e:
-                        logger.error(f"Fallback method for video also failed: {inner_e}", exc_info=True)
-                    
+                    logger.error(f"Error sending video: {e}", exc_info=True)
                     await update.message.reply_text(
                         "⚠️ Не удалось отправить видео. Попробуйте еще раз."
                     )
