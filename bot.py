@@ -205,10 +205,27 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     elif query.data == "find_chat":
         return await find_chat(update, context)
     
-    elif query.data == "search_no_filters":
-        logger.debug(f"User {user_id} is looking for a chat partner without filters")
+    elif query.data == "cancel_search":
+        # Remove user from searching list
+        if user_id in searching_users:
+            del searching_users[user_id]
         
-        # End current chat if any
+        keyboard = [
+            [
+                InlineKeyboardButton("👤 Профиль", callback_data="profile"),
+                InlineKeyboardButton("🔍 Найти собеседника", callback_data="find_chat")
+            ]
+        ]
+        
+        await query.edit_message_text(
+            text="❌ *Поиск отменен*\n\nВыберите действие:",
+            reply_markup=InlineKeyboardMarkup(keyboard),
+            parse_mode="Markdown"
+        )
+        return START
+    
+    elif query.data == "skip_user":
+        # Skip current chat partner and find a new one
         if user_id in active_chats:
             partner_id = active_chats[user_id]
             
@@ -230,7 +247,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
             
             del active_chats[user_id]
         
-        # Send initial search message
+        # Start new search
         search_message = await query.edit_message_text(
             text="🔍 *Поиск собеседника...*\n\n⏱ Время поиска: 00:00",
             parse_mode="Markdown",
@@ -251,25 +268,51 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         
         return START
     
-    elif query.data == "cancel_search":
-        # Remove user from searching list
-        if user_id in searching_users:
-            del searching_users[user_id]
-        
-        # Return to main menu
-        keyboard = [
-            [
-                InlineKeyboardButton("👤 Профиль", callback_data="profile"),
-                InlineKeyboardButton("🔍 Найти собеседника", callback_data="find_chat")
-            ],
-            [InlineKeyboardButton("ℹ️ Помощь", callback_data="help")]
-        ]
-        reply_markup = InlineKeyboardMarkup(keyboard)
-        
+    elif query.data == "end_chat":
+        return await end_chat(update, context)
+    
+    elif query.data.startswith("rate_"):
+        # Handle rating
+        parts = query.data.split("_")
+        if len(parts) == 3:
+            partner_id = parts[1]
+            rating = int(parts[2])
+            
+            # Save rating
+            if partner_id in user_data:
+                ratings = user_data[partner_id].get("ratings", [])
+                ratings.append(rating)
+                user_data[partner_id]["ratings"] = ratings
+                user_data[partner_id]["avg_rating"] = sum(ratings) / len(ratings)
+                save_user_data(user_data)
+            
+            await query.edit_message_text(
+                text=f"✅ *Спасибо за оценку!*\n\nВы поставили {rating} {'⭐' * rating}",
+                parse_mode="Markdown",
+                reply_markup=InlineKeyboardMarkup([
+                    [InlineKeyboardButton("🔍 Найти нового собеседника", callback_data="find_chat")],
+                    [InlineKeyboardButton("👤 Профиль", callback_data="profile")]
+                ])
+            )
+        else:
+            await query.edit_message_text(
+                text="❌ *Ошибка при оценке собеседника*",
+                parse_mode="Markdown",
+                reply_markup=InlineKeyboardMarkup([
+                    [InlineKeyboardButton("🔍 Найти нового собеседника", callback_data="find_chat")],
+                    [InlineKeyboardButton("👤 Профиль", callback_data="profile")]
+                ])
+            )
+        return START
+    
+    elif query.data == "skip_rating":
         await query.edit_message_text(
-            text="*Поиск отменен* ❌\n\n*Выберите действие:*",
-            reply_markup=reply_markup,
-            parse_mode="Markdown"
+            text="✅ *Оценка пропущена*",
+            parse_mode="Markdown",
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton("🔍 Найти нового собеседника", callback_data="find_chat")],
+                [InlineKeyboardButton("👤 Профиль", callback_data="profile")]
+            ])
         )
         return START
     
@@ -278,262 +321,69 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
             [
                 InlineKeyboardButton("👤 Профиль", callback_data="profile"),
                 InlineKeyboardButton("🔍 Найти собеседника", callback_data="find_chat")
-            ],
-            [InlineKeyboardButton("ℹ️ Помощь", callback_data="help")]
+            ]
         ]
-        reply_markup = InlineKeyboardMarkup(keyboard)
         
         await query.edit_message_text(
-            text="*Dox: Анонимный Чат* 🎭\n\n*Выберите действие:*",
-            reply_markup=reply_markup,
-            parse_mode="Markdown"
-        )
-        return START
-    
-    elif query.data == "help":
-        help_text = (
-            "🤖 *Dox: Анонимный Чат* - Помощь\n\n"
-            "*Основные команды:*\n"
-            "• /start - Запустить бота\n"
-            "• /help - Показать это сообщение\n\n"
-            "*Кнопки:*\n"
-            "• 🔍 Найти собеседника - Начать поиск партнера для чата\n"
-            "• 🚫 Завершить чат - Закончить текущий разговор\n"
-            "• 👤 Мой профиль - Просмотр и редактирование профиля\n"
-            "• ❓ Помощь - Показать это сообщение\n\n"
-            "*Как это работает:*\n"
-            "1. Заполните свой профиль (пол, возраст, интересы)\n"
-            "2. Нажмите 'Найти собеседника'\n"
-            "3. Бот подберет вам партнера для анонимного общения\n"
-            "4. После завершения чата вы можете оценить собеседника\n\n"
-            "*Правила:*\n"
-            "• Будьте вежливы и уважительны\n"
-            "• Не отправляйте спам или оскорбительный контент\n"
-            "• Не делитесь личной информацией\n\n"
-            "Приятного общения! 😊"
-        )
-        
-        keyboard = [[InlineKeyboardButton("🔙 Назад", callback_data="back_to_start")]]
-        
-        await query.edit_message_text(
-            text=help_text,
+            text="*Добро пожаловать в Dox: Анонимный Чат* 🎭\n\n"
+                 "Здесь вы можете анонимно общаться с другими пользователями.\n\n"
+                 "*Выберите действие:*",
             reply_markup=InlineKeyboardMarkup(keyboard),
             parse_mode="Markdown"
         )
         return START
     
-    elif query.data == "skip_user":
-        # End current chat if any
-        if user_id in active_chats:
-            partner_id = active_chats[user_id]
-            
-            # Notify partner that chat has ended
-            if partner_id in active_chats:
-                try:
-                    await context.bot.send_message(
-                        chat_id=int(partner_id),
-                        text="❌ *Собеседник покинул чат*\n\nВыберите действие:",
-                        parse_mode="Markdown",
-                        reply_markup=InlineKeyboardMarkup([
-                            [InlineKeyboardButton("🔍 Найти нового собеседника", callback_data="find_chat")],
-                            [InlineKeyboardButton("👤 Профиль", callback_data="profile")]
-                        ])
-                    )
-                    del active_chats[partner_id]
-                except Exception as e:
-                    logger.error(f"Error notifying partner: {e}")
-            
-            del active_chats[user_id]
+    # Handle interest selection
+    elif query.data.startswith("interest_"):
+        interest = query.data.split("_")[1]
         
-        # Find new chat
-        return await find_chat(update, context)
+        if user_id in user_data:
+            interests = user_data[user_id].get("interests", [])
+            
+            if interest in interests:
+                interests.remove(interest)
+            else:
+                interests.append(interest)
+            
+            user_data[user_id]["interests"] = interests
+            save_user_data(user_data)
+        
+        # Show updated profile
+        return await show_profile(update, context)
     
-    elif query.data == "end_chat":
-        # End current chat
-        if user_id in active_chats:
-            partner_id = active_chats[user_id]
-            
-            # Store last partner for rating
-            context.user_data["last_partner"] = partner_id
-            
-            # Notify partner that chat has ended
-            if partner_id in active_chats:
-                try:
-                    await context.bot.send_message(
-                        chat_id=int(partner_id),
-                        text="❌ *Собеседник завершил чат*\n\nВыберите действие:",
-                        parse_mode="Markdown",
-                        reply_markup=InlineKeyboardMarkup([
-                            [InlineKeyboardButton("🔍 Найти нового собеседника", callback_data="find_chat")],
-                            [InlineKeyboardButton("👤 Профиль", callback_data="profile")]
-                        ])
-                    )
-                    del active_chats[partner_id]
-                except Exception as e:
-                    logger.error(f"Error notifying partner: {e}")
-            
-            del active_chats[user_id]
-            
-            # Ask to rate the partner
-            keyboard = [
-                [
-                    InlineKeyboardButton("1⭐", callback_data="rate_1"),
-                    InlineKeyboardButton("2⭐", callback_data="rate_2"),
-                    InlineKeyboardButton("3⭐", callback_data="rate_3"),
-                    InlineKeyboardButton("4⭐", callback_data="rate_4"),
-                    InlineKeyboardButton("5⭐", callback_data="rate_5")
-                ]
-            ]
-            
-            await query.edit_message_text(
-                text="*Чат завершен*\n\nОцените вашего собеседника:",
-                reply_markup=InlineKeyboardMarkup(keyboard),
-                parse_mode="Markdown"
-            )
-            return START
-        
-        # If not in chat, return to main menu
-        keyboard = [
-            [
-                InlineKeyboardButton("👤 Профиль", callback_data="profile"),
-                InlineKeyboardButton("🔍 Найти собеседника", callback_data="find_chat")
-            ]
-        ]
-        
-        await query.edit_message_text(
-            text="У вас нет активного чата.",
-            reply_markup=InlineKeyboardMarkup(keyboard)
-        )
-        return START
-    
+    # Handle edit profile
     elif query.data == "edit_profile":
         keyboard = [
-            [InlineKeyboardButton("👨 Мужской", callback_data="gender_male")],
-            [InlineKeyboardButton("👩 Женский", callback_data="gender_female")],
-            [InlineKeyboardButton("🔙 Назад", callback_data="profile")]
-        ]
-        await query.edit_message_text(
-            text="*Выберите ваш пол:*",
-            reply_markup=InlineKeyboardMarkup(keyboard),
-            parse_mode="Markdown"
-        )
-        return EDIT_PROFILE
-    
-    elif query.data == "interest_edit":
-        interests = user_data[user_id].get("interests", [])
-        interests_text = "✅ Флирт" if "flirt" in interests else "❌ Флирт"
-        interests_text += "\n✅ Общение" if "chat" in interests else "\n❌ Общение"
-        
-        keyboard = [
-            [InlineKeyboardButton("💘 Флирт " + ("✅" if "flirt" in interests else "❌"), callback_data="interest_flirt")],
-            [InlineKeyboardButton("💬 Общение " + ("✅" if "chat" in interests else "❌"), callback_data="interest_chat")],
+            [InlineKeyboardButton("✏️ Изменить возраст", callback_data="edit_age")],
+            [InlineKeyboardButton("🖼 Загрузить аватар", callback_data="upload_avatar")],
             [InlineKeyboardButton("🔙 Назад к профилю", callback_data="profile")]
         ]
         
         await query.edit_message_text(
-            text=f"*Ваши интересы:*\n\nВыберите интересы, которые хотите добавить или удалить:",
+            text="*Редактирование профиля*\n\nВыберите, что хотите изменить:",
             reply_markup=InlineKeyboardMarkup(keyboard),
             parse_mode="Markdown"
         )
         return EDIT_PROFILE
     
-    elif query.data.startswith("gender_"):
-        gender = query.data.split("_")[1]
-        user_data[user_id]["gender"] = gender
-        save_user_data(user_data)
-        
-        keyboard = [
-            [InlineKeyboardButton("🔙 Назад", callback_data="profile")]
-        ]
+    elif query.data == "edit_age":
         await query.edit_message_text(
-            text=f"*Укажите ваш возраст:*\n\nОтправьте сообщение с вашим возрастом.",
-            reply_markup=InlineKeyboardMarkup(keyboard),
+            text="*Введите ваш возраст:*\n\n"
+                 "Отправьте число от 13 до 100.",
             parse_mode="Markdown"
         )
         context.user_data["edit_field"] = "age"
         return EDIT_PROFILE
     
-    elif query.data.startswith("interest_"):
-        interest = query.data.split("_")[1]
-        interests = user_data[user_id].get("interests", [])
-        
-        if interest in interests:
-            interests.remove(interest)
-        else:
-            interests.append(interest)
-        
-        user_data[user_id]["interests"] = interests
-        save_user_data(user_data)
-        
-        # Show updated interests
-        keyboard = [
-            [InlineKeyboardButton("💘 Флирт " + ("✅" if "flirt" in interests else "❌"), callback_data="interest_flirt")],
-            [InlineKeyboardButton("💬 Общение " + ("✅" if "chat" in interests else "❌"), callback_data="interest_chat")],
-            [InlineKeyboardButton("🔙 Назад к профилю", callback_data="profile")]
-        ]
-        
-        # Calculate profile completion
-        completed_fields = 0
-        total_fields = 3  # gender, age, interests
-        
-        if user_data[user_id].get("gender"):
-            completed_fields += 1
-        if user_data[user_id].get("age"):
-            completed_fields += 1
-        if interests:
-            completed_fields += 1
-        
-        completion_percentage = int(completed_fields / total_fields * 100)
-        completion_bar = "▓" * (completion_percentage // 10) + "░" * (10 - completion_percentage // 10)
-        
+    elif query.data == "upload_avatar":
         await query.edit_message_text(
-            text=f"*Ваши интересы обновлены!*\n\n"
-                 f"Текущие интересы:\n"
-                 f"• 💘 Флирт: {('✅' if 'flirt' in interests else '❌')}\n"
-                 f"• 💬 Общение: {('✅' if 'chat' in interests else '❌')}\n\n"
-                 f"Заполнено {completion_percentage}% профиля.",
-            reply_markup=InlineKeyboardMarkup(keyboard),
+            text="*Загрузка аватара*\n\n"
+                 "Отправьте фотографию, которую хотите использовать как аватар.\n\n"
+                 "Для отмены нажмите /cancel",
             parse_mode="Markdown"
         )
-        return EDIT_PROFILE
-    
-    elif query.data == "rate_1" or query.data == "rate_2" or query.data == "rate_3" or query.data == "rate_4" or query.data == "rate_5":
-        rating = int(query.data.split("_")[1])
-        partner_id = context.user_data.get("last_partner")
-        
-        if partner_id:
-            # Update partner's rating
-            if partner_id in user_data:
-                current_rating = user_data[partner_id].get("rating", 0)
-                rating_count = user_data[partner_id].get("rating_count", 0)
-                
-                # Calculate new average rating
-                new_rating = (current_rating * rating_count + rating) / (rating_count + 1)
-                user_data[partner_id]["rating"] = new_rating
-                user_data[partner_id]["rating_count"] = rating_count + 1
-                save_user_data(user_data)
-        
-        # Show rating stars
-        rating_stars = "⭐" * rating + "☆" * (5 - rating)
-        
-        keyboard = [
-            [
-                InlineKeyboardButton("🔍 Найти нового собеседника", callback_data="find_chat")
-            ],
-            [
-                InlineKeyboardButton("👤 Профиль", callback_data="profile"),
-                InlineKeyboardButton("🏠 Главное меню", callback_data="back_to_start")
-            ]
-        ]
-        
-        await query.edit_message_text(
-            text=f"*Спасибо за оценку!* {rating_stars}\n\n"
-                 f"Вы поставили оценку {rating}/5\n\n"
-                 f"Что хотите сделать дальше?",
-            reply_markup=InlineKeyboardMarkup(keyboard),
-            parse_mode="Markdown"
-        )
-        return START
+        context.user_data["uploading_avatar"] = True
+        return PROFILE
     
     return START
 
@@ -669,63 +519,62 @@ async def handle_avatar_upload(update: Update, context: ContextTypes.DEFAULT_TYP
     return PROFILE
 
 async def find_chat(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Find a chat partner."""
-    try:
-        if update.callback_query:
-            query = update.callback_query
-            user_id = str(query.from_user.id)
-            
-            # If this is initial search request, show filter options
-            if query.data == "find_chat":
-                keyboard = [
-                    [InlineKeyboardButton("🔍 Поиск без фильтров", callback_data="search_no_filters")],
-                    [InlineKeyboardButton("⚙️ Настроить фильтры", callback_data="setup_filters")],
-                    [InlineKeyboardButton("🔙 Назад", callback_data="back_to_start")]
-                ]
-                
-                await query.edit_message_text(
-                    text="*Поиск собеседника*\n\n"
-                         "Выберите вариант поиска:",
-                    reply_markup=InlineKeyboardMarkup(keyboard),
-                    parse_mode="Markdown"
-                )
-                return START
-            
-            # Handle filter setup
-            elif query.data == "setup_filters":
-                keyboard = [
-                    [InlineKeyboardButton("👨 Мужской", callback_data="filter_gender_male"),
-                     InlineKeyboardButton("👩 Женский", callback_data="filter_gender_female")],
-                    [InlineKeyboardButton("🎯 Возраст", callback_data="filter_age")],
-                    [InlineKeyboardButton("💭 Интересы", callback_data="filter_interests")],
-                    [InlineKeyboardButton("✅ Начать поиск", callback_data="search_with_filters")],
-                    [InlineKeyboardButton("🔙 Назад", callback_data="find_chat")]
-                ]
-                
-                await query.edit_message_text(
-                    text="*Настройка фильтров поиска*\n\n"
-                         "Выберите параметры для поиска:",
-                    reply_markup=InlineKeyboardMarkup(keyboard),
-                    parse_mode="Markdown"
-                )
-                return START
+    """Start looking for a chat partner."""
+    user_id = str(update.effective_user.id)
+    logger.debug(f"User {user_id} is looking for a chat partner")
+    
+    # End current chat if any
+    if user_id in active_chats:
+        partner_id = active_chats[user_id]
         
-        return START
-    except Exception as e:
-        logger.error(f"Error in find_chat: {e}", exc_info=True)
-        if update.callback_query:
+        # Notify partner that chat has ended
+        if partner_id in active_chats:
             try:
-                await update.callback_query.edit_message_text(
-                    text="❌ *Произошла ошибка при поиске собеседника*\n\nПожалуйста, попробуйте еще раз.",
+                await context.bot.send_message(
+                    chat_id=int(partner_id),
+                    text="❌ *Собеседник покинул чат*\n\nВыберите действие:",
                     parse_mode="Markdown",
                     reply_markup=InlineKeyboardMarkup([
-                        [InlineKeyboardButton("🔄 Попробовать снова", callback_data="find_chat")],
+                        [InlineKeyboardButton("🔍 Найти нового собеседника", callback_data="find_chat")],
                         [InlineKeyboardButton("👤 Профиль", callback_data="profile")]
                     ])
                 )
-            except Exception:
-                pass
-        return START
+                del active_chats[partner_id]
+            except Exception as e:
+                logger.error(f"Error notifying partner: {e}")
+        
+        del active_chats[user_id]
+    
+    # Send initial search message
+    if update.callback_query:
+        search_message = await update.callback_query.edit_message_text(
+            text="🔍 *Поиск собеседника...*\n\n⏱ Время поиска: 00:00",
+            parse_mode="Markdown",
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton("❌ Отменить поиск", callback_data="cancel_search")]
+            ])
+        )
+    else:
+        search_message = await context.bot.send_message(
+            chat_id=update.effective_chat.id,
+            text="🔍 *Поиск собеседника...*\n\n⏱ Время поиска: 00:00",
+            parse_mode="Markdown",
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton("❌ Отменить поиск", callback_data="cancel_search")]
+            ])
+        )
+    
+    # Add user to searching users
+    searching_users[user_id] = {
+        "start_time": time.time(),
+        "message_id": search_message.message_id,
+        "chat_id": update.effective_chat.id
+    }
+    
+    # Start continuous search in background
+    asyncio.create_task(continuous_search(user_id, context))
+    
+    return START
 
 async def continuous_search(user_id: str, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Continuously search for a chat partner in the background."""
@@ -774,6 +623,11 @@ async def continuous_search(user_id: str, context: ContextTypes.DEFAULT_TYPE) ->
                 partner_id = random.choice(available_users)
                 logger.debug(f"Matched user {user_id} with partner {partner_id}")
                 
+                # Get partner's search info before removing from searching
+                partner_search_info = searching_users.get(partner_id, {})
+                partner_chat_id = partner_search_info.get("chat_id")
+                partner_message_id = partner_search_info.get("message_id")
+                
                 # Remove both users from searching
                 if user_id in searching_users:
                     del searching_users[user_id]
@@ -787,6 +641,13 @@ async def continuous_search(user_id: str, context: ContextTypes.DEFAULT_TYPE) ->
                 # Initialize chat stats
                 chat_stats[user_id] = ChatStats()
                 chat_stats[partner_id] = ChatStats()
+                
+                # Increment chat count for both users
+                if user_id in user_data:
+                    user_data[user_id]["chat_count"] = user_data[user_id].get("chat_count", 0) + 1
+                if partner_id in user_data:
+                    user_data[partner_id]["chat_count"] = user_data[partner_id].get("chat_count", 0) + 1
+                save_user_data(user_data)
                 
                 # Get partner info
                 partner_info = user_data.get(partner_id, {})
@@ -826,33 +687,30 @@ async def continuous_search(user_id: str, context: ContextTypes.DEFAULT_TYPE) ->
                     )
                     
                     # Pin the message
-                    pinned_message = await context.bot.pin_chat_message(
-                        chat_id=chat_id,
-                        message_id=message_id,
-                        disable_notification=True
-                    )
-                    context.user_data["pinned_message_id"] = message_id
+                    try:
+                        pinned_message = await context.bot.pin_chat_message(
+                            chat_id=chat_id,
+                            message_id=message_id,
+                            disable_notification=True
+                        )
+                    except Exception as e:
+                        logger.error(f"Error pinning message for user {user_id}: {e}")
                     
-                    # Get partner's search info
-                    partner_search_info = search_info.get(partner_id, {})
-                    partner_chat_id = partner_search_info.get("chat_id")
-                    partner_message_id = partner_search_info.get("message_id")
-                    
-                    # Send message to partner
+                    # Get user info for partner
                     user_info = user_data.get(user_id, {})
                     user_text = f"*Информация о собеседнике:*\n\n"
                     if user_info.get("gender"):
-                        gender = "👨 Мужской" if user_info.get("gender") == "male" else "👩 Женский"
-                        user_text += f"*Пол:* {gender}\n"
+                        user_gender = "👨 Мужской" if user_info.get("gender") == "male" else "👩 Женский"
+                        user_text += f"*Пол:* {user_gender}\n"
                     if user_info.get("age"):
                         user_text += f"*Возраст:* {user_info.get('age')}\n"
                     
-                    interests = user_info.get("interests", [])
-                    if interests:
+                    user_interests = user_info.get("interests", [])
+                    if user_interests:
                         interests_text = ""
-                        if "flirt" in interests:
+                        if "flirt" in user_interests:
                             interests_text += "• 💘 Флирт\n"
-                        if "chat" in interests:
+                        if "chat" in user_interests:
                             interests_text += "• 💬 Общение\n"
                         user_text += f"*Интересы:*\n{interests_text}"
                     
@@ -868,30 +726,62 @@ async def continuous_search(user_id: str, context: ContextTypes.DEFAULT_TYPE) ->
                             )
                             
                             # Pin message for partner
-                            await context.bot.pin_chat_message(
-                                chat_id=partner_chat_id,
-                                message_id=partner_message_id,
-                                disable_notification=True
-                            )
-                            context.user_data[f"partner_{partner_id}_pinned_message"] = partner_message_id
+                            try:
+                                await context.bot.pin_chat_message(
+                                    chat_id=partner_chat_id,
+                                    message_id=partner_message_id,
+                                    disable_notification=True
+                                )
+                            except Exception as e:
+                                logger.error(f"Error pinning message for partner {partner_id}: {e}")
+                                
                         except Exception as e:
                             logger.error(f"Error updating partner's search message: {e}")
                     else:
                         # Partner wasn't searching, send a new message
-                        partner_message = await context.bot.send_message(
-                            chat_id=int(partner_id),
-                            text=f"✅ *Собеседник найден!*\n\n{user_text}\n\n*Начните общение прямо сейчас!*",
-                            parse_mode="Markdown",
-                            reply_markup=InlineKeyboardMarkup(keyboard)
-                        )
-                        
-                        # Pin message for partner
-                        await context.bot.pin_chat_message(
-                            chat_id=int(partner_id),
-                            message_id=partner_message.message_id,
-                            disable_notification=True
-                        )
-                        context.user_data[f"partner_{partner_id}_pinned_message"] = partner_message.message_id
+                        try:
+                            partner_message = await context.bot.send_message(
+                                chat_id=int(partner_id),
+                                text=f"✅ *Собеседник найден!*\n\n{user_text}\n\n*Начните общение прямо сейчас!*",
+                                parse_mode="Markdown",
+                                reply_markup=InlineKeyboardMarkup(keyboard)
+                            )
+                            
+                            # Pin message for partner
+                            try:
+                                await context.bot.pin_chat_message(
+                                    chat_id=int(partner_id),
+                                    message_id=partner_message.message_id,
+                                    disable_notification=True
+                                )
+                            except Exception as e:
+                                logger.error(f"Error pinning message for partner {partner_id}: {e}")
+                                
+                        except Exception as e:
+                            logger.error(f"Error sending message to partner {partner_id}: {e}")
+                            # If we can't send a message to the partner, clean up the chat
+                            if user_id in active_chats:
+                                del active_chats[user_id]
+                            if partner_id in active_chats:
+                                del active_chats[partner_id]
+                            
+                            # Notify the user that the partner is unavailable
+                            try:
+                                await context.bot.edit_message_text(
+                                    chat_id=chat_id,
+                                    message_id=message_id,
+                                    text="❌ *Не удалось связаться с собеседником*\n\nПожалуйста, попробуйте найти другого собеседника.",
+                                    parse_mode="Markdown",
+                                    reply_markup=InlineKeyboardMarkup([
+                                        [InlineKeyboardButton("🔍 Найти нового собеседника", callback_data="find_chat")],
+                                        [InlineKeyboardButton("👤 Профиль", callback_data="profile")]
+                                    ])
+                                )
+                            except Exception as e:
+                                logger.error(f"Error notifying user about partner unavailability: {e}")
+                            
+                            # Continue searching
+                            continue
                     
                 except Exception as e:
                     logger.error(f"Error notifying users about match: {e}")
@@ -900,8 +790,6 @@ async def continuous_search(user_id: str, context: ContextTypes.DEFAULT_TYPE) ->
                         del active_chats[user_id]
                     if partner_id in active_chats:
                         del active_chats[partner_id]
-                    if user_id in searching_users:
-                        del searching_users[user_id]
                     continue
                 
                 break
@@ -1027,22 +915,95 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
                     chat_id=int(partner_id),
                     text=update.message.text
                 )
-            else:
-                # For all media messages, use forward_message
-                # This handles voice, video notes, photos, videos, stickers, etc.
+            elif update.message.voice:
+                # For voice messages, use copy_message
                 try:
-                    await context.bot.forward_message(
+                    # First, notify the partner that voice is being processed
+                    await context.bot.send_chat_action(
+                        chat_id=int(partner_id),
+                        action="record_voice"
+                    )
+                    
+                    # Use copy_message which preserves all media
+                    await context.bot.copy_message(
                         chat_id=int(partner_id),
                         from_chat_id=update.effective_chat.id,
-                        message_id=update.message.message_id,
-                        disable_notification=True
+                        message_id=update.message.message_id
                     )
-                    logger.debug(f"Forwarded media message from {user_id} to {partner_id}")
+                    logger.debug(f"Copied voice message from {user_id} to {partner_id}")
                 except Exception as e:
-                    logger.error(f"Error forwarding media message: {e}", exc_info=True)
+                    logger.error(f"Error copying voice message: {e}", exc_info=True)
                     await update.message.reply_text(
-                        "⚠️ Не удалось отправить медиа-сообщение. Попробуйте еще раз."
+                        "⚠️ Не удалось отправить голосовое сообщение. Попробуйте еще раз."
                     )
+            elif update.message.video_note:
+                # For video notes (circles), use copy_message
+                try:
+                    # First, notify the partner that video note is being processed
+                    await context.bot.send_chat_action(
+                        chat_id=int(partner_id),
+                        action="record_video_note"
+                    )
+                    
+                    # Use copy_message which preserves all media
+                    await context.bot.copy_message(
+                        chat_id=int(partner_id),
+                        from_chat_id=update.effective_chat.id,
+                        message_id=update.message.message_id
+                    )
+                    logger.debug(f"Copied video note from {user_id} to {partner_id}")
+                except Exception as e:
+                    logger.error(f"Error copying video note: {e}", exc_info=True)
+                    await update.message.reply_text(
+                        "⚠️ Не удалось отправить видео-кружок. Попробуйте еще раз."
+                    )
+            elif update.message.photo:
+                # For photos, use copy_message
+                try:
+                    await context.bot.copy_message(
+                        chat_id=int(partner_id),
+                        from_chat_id=update.effective_chat.id,
+                        message_id=update.message.message_id
+                    )
+                    logger.debug(f"Copied photo from {user_id} to {partner_id}")
+                except Exception as e:
+                    logger.error(f"Error copying photo: {e}", exc_info=True)
+                    await update.message.reply_text(
+                        "⚠️ Не удалось отправить фото. Попробуйте еще раз."
+                    )
+            elif update.message.video:
+                # For videos, use copy_message
+                try:
+                    await context.bot.copy_message(
+                        chat_id=int(partner_id),
+                        from_chat_id=update.effective_chat.id,
+                        message_id=update.message.message_id
+                    )
+                    logger.debug(f"Copied video from {user_id} to {partner_id}")
+                except Exception as e:
+                    logger.error(f"Error copying video: {e}", exc_info=True)
+                    await update.message.reply_text(
+                        "⚠️ Не удалось отправить видео. Попробуйте еще раз."
+                    )
+            elif update.message.sticker or update.message.animation or update.message.document or update.message.audio:
+                # For other media types, use copy_message
+                try:
+                    await context.bot.copy_message(
+                        chat_id=int(partner_id),
+                        from_chat_id=update.effective_chat.id,
+                        message_id=update.message.message_id
+                    )
+                    logger.debug(f"Copied media from {user_id} to {partner_id}")
+                except Exception as e:
+                    logger.error(f"Error copying media: {e}", exc_info=True)
+                    await update.message.reply_text(
+                        "⚠️ Не удалось отправить медиа-файл. Попробуйте еще раз."
+                    )
+            else:
+                # Unsupported message type
+                await update.message.reply_text(
+                    "⚠️ Этот тип сообщения не поддерживается."
+                )
             
             # Update typing status
             chat_stats[user_id].is_typing = False
