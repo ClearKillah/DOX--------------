@@ -205,6 +205,52 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     elif query.data == "find_chat":
         return await find_chat(update, context)
     
+    elif query.data == "search_no_filters":
+        logger.debug(f"User {user_id} is looking for a chat partner without filters")
+        
+        # End current chat if any
+        if user_id in active_chats:
+            partner_id = active_chats[user_id]
+            
+            # Notify partner that chat has ended
+            if partner_id in active_chats:
+                try:
+                    await context.bot.send_message(
+                        chat_id=int(partner_id),
+                        text="❌ *Собеседник покинул чат*\n\nВыберите действие:",
+                        parse_mode="Markdown",
+                        reply_markup=InlineKeyboardMarkup([
+                            [InlineKeyboardButton("🔍 Найти нового собеседника", callback_data="find_chat")],
+                            [InlineKeyboardButton("👤 Профиль", callback_data="profile")]
+                        ])
+                    )
+                    del active_chats[partner_id]
+                except Exception as e:
+                    logger.error(f"Error notifying partner: {e}")
+            
+            del active_chats[user_id]
+        
+        # Send initial search message
+        search_message = await query.edit_message_text(
+            text="🔍 *Поиск собеседника...*\n\n⏱ Время поиска: 00:00",
+            parse_mode="Markdown",
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton("❌ Отменить поиск", callback_data="cancel_search")]
+            ])
+        )
+        
+        # Add user to searching users
+        searching_users[user_id] = {
+            "start_time": time.time(),
+            "message_id": search_message.message_id,
+            "chat_id": query.message.chat_id
+        }
+        
+        # Start continuous search in background
+        asyncio.create_task(continuous_search(user_id, context))
+        
+        return START
+    
     elif query.data == "cancel_search":
         # Remove user from searching list
         if user_id in searching_users:
@@ -628,7 +674,6 @@ async def find_chat(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
         if update.callback_query:
             query = update.callback_query
             user_id = str(query.from_user.id)
-            chat_id = query.message.chat_id
             
             # If this is initial search request, show filter options
             if query.data == "find_chat":
@@ -646,55 +691,24 @@ async def find_chat(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
                 )
                 return START
             
-            # Start search without filters
-            elif query.data == "search_no_filters":
-                logger.debug(f"User {user_id} is looking for a chat partner without filters")
+            # Handle filter setup
+            elif query.data == "setup_filters":
+                keyboard = [
+                    [InlineKeyboardButton("👨 Мужской", callback_data="filter_gender_male"),
+                     InlineKeyboardButton("👩 Женский", callback_data="filter_gender_female")],
+                    [InlineKeyboardButton("🎯 Возраст", callback_data="filter_age")],
+                    [InlineKeyboardButton("💭 Интересы", callback_data="filter_interests")],
+                    [InlineKeyboardButton("✅ Начать поиск", callback_data="search_with_filters")],
+                    [InlineKeyboardButton("🔙 Назад", callback_data="find_chat")]
+                ]
                 
-                # End current chat if any
-                if user_id in active_chats:
-                    partner_id = active_chats[user_id]
-                    
-                    # Notify partner that chat has ended
-                    if partner_id in active_chats:
-                        try:
-                            await context.bot.send_message(
-                                chat_id=int(partner_id),
-                                text="❌ *Собеседник покинул чат*\n\nВыберите действие:",
-                                parse_mode="Markdown",
-                                reply_markup=InlineKeyboardMarkup([
-                                    [InlineKeyboardButton("🔍 Найти нового собеседника", callback_data="find_chat")],
-                                    [InlineKeyboardButton("👤 Профиль", callback_data="profile")]
-                                ])
-                            )
-                            del active_chats[partner_id]
-                        except Exception as e:
-                            logger.error(f"Error notifying partner: {e}")
-                    
-                    del active_chats[user_id]
-                
-                # Send initial search message
-                search_message = await query.edit_message_text(
-                    text="🔍 *Поиск собеседника...*\n\n⏱ Время поиска: 00:00",
-                    parse_mode="Markdown",
-                    reply_markup=InlineKeyboardMarkup([
-                        [InlineKeyboardButton("❌ Отменить поиск", callback_data="cancel_search")]
-                    ])
+                await query.edit_message_text(
+                    text="*Настройка фильтров поиска*\n\n"
+                         "Выберите параметры для поиска:",
+                    reply_markup=InlineKeyboardMarkup(keyboard),
+                    parse_mode="Markdown"
                 )
-                
-                # Add user to searching users
-                searching_users[user_id] = {
-                    "start_time": time.time(),
-                    "message_id": search_message.message_id,
-                    "chat_id": chat_id
-                }
-                
-                # Start continuous search in background
-                asyncio.create_task(continuous_search(user_id, context))
-                
                 return START
-            
-            # Handle other callback queries...
-            # ... rest of the function remains unchanged ...
         
         return START
     except Exception as e:
