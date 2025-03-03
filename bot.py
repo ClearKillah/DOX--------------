@@ -917,7 +917,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
                     text=update.message.text
                 )
             elif update.message.voice:
-                # For voice messages, use copy_message
+                # For voice messages, download and send directly
                 try:
                     # First, notify the partner that voice is being processed
                     await context.bot.send_chat_action(
@@ -930,58 +930,44 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
                     voice_duration = update.message.voice.duration
                     logger.info(f"Processing voice message from {user_id} to {partner_id}: file_id={voice_file_id}, duration={voice_duration}s")
                     
-                    # Use copy_message which preserves all media
-                    sent_message = await context.bot.copy_message(
+                    # Get the voice file
+                    voice_file = await context.bot.get_file(voice_file_id)
+                    
+                    # Download the voice file
+                    voice_bytes = await voice_file.download_as_bytearray()
+                    
+                    # Send as a new voice message
+                    sent = await context.bot.send_voice(
                         chat_id=int(partner_id),
-                        from_chat_id=update.effective_chat.id,
-                        message_id=update.message.message_id
+                        voice=voice_bytes,
+                        duration=voice_duration,
+                        caption=update.message.caption if update.message.caption else None
                     )
                     
-                    # Verify the message was sent successfully
-                    if sent_message:
-                        logger.info(f"Successfully copied voice message from {user_id} to {partner_id}, new message_id={sent_message.message_id}")
+                    if sent:
+                        logger.info(f"Successfully sent voice message from {user_id} to {partner_id}")
                     else:
-                        logger.warning(f"Voice message copy returned None, but no exception was raised")
+                        logger.warning(f"Voice message send returned None, but no exception was raised")
                         
                 except telegram.error.BadRequest as e:
-                    logger.error(f"BadRequest error copying voice message: {e}", exc_info=True)
+                    logger.error(f"BadRequest error sending voice message: {e}", exc_info=True)
                     await update.message.reply_text(
                         "⚠️ Не удалось отправить голосовое сообщение из-за ошибки Telegram. Попробуйте еще раз."
                     )
                 except telegram.error.Unauthorized as e:
-                    logger.error(f"Unauthorized error copying voice message: {e}", exc_info=True)
+                    logger.error(f"Unauthorized error sending voice message: {e}", exc_info=True)
                     await update.message.reply_text(
                         "⚠️ Не удалось отправить голосовое сообщение. Возможно, собеседник заблокировал бота."
                     )
                     # End the chat since the partner is unavailable
                     return await end_chat(update, context)
                 except Exception as e:
-                    logger.error(f"Error copying voice message: {e}", exc_info=True)
-                    
-                    # Try alternative method - download and send
-                    try:
-                        logger.info("Attempting alternative method for voice message")
-                        voice_file = await context.bot.get_file(update.message.voice.file_id)
-                        voice_bytes = await voice_file.download_as_bytearray()
-                        
-                        # Send as new voice message
-                        sent = await context.bot.send_voice(
-                            chat_id=int(partner_id),
-                            voice=voice_bytes,
-                            duration=update.message.voice.duration,
-                            caption=update.message.caption if update.message.caption else None
-                        )
-                        
-                        if sent:
-                            logger.info(f"Successfully sent voice message using alternative method")
-                        
-                    except Exception as inner_e:
-                        logger.error(f"Alternative method also failed: {inner_e}", exc_info=True)
-                        await update.message.reply_text(
-                            "⚠️ Не удалось отправить голосовое сообщение. Попробуйте еще раз или используйте текстовые сообщения."
-                        )
+                    logger.error(f"Error sending voice message: {e}", exc_info=True)
+                    await update.message.reply_text(
+                        "⚠️ Не удалось отправить голосовое сообщение. Попробуйте еще раз или используйте текстовые сообщения."
+                    )
             elif update.message.video_note:
-                # For video notes (circles), use copy_message
+                # For video notes (circles), download and send directly
                 try:
                     # First, notify the partner that video note is being processed
                     await context.bot.send_chat_action(
@@ -989,29 +975,99 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
                         action="record_video_note"
                     )
                     
-                    # Use copy_message which preserves all media
-                    await context.bot.copy_message(
+                    # Get the video note file
+                    video_note_file_id = update.message.video_note.file_id
+                    video_note_length = update.message.video_note.length
+                    video_note_duration = update.message.video_note.duration
+                    
+                    logger.info(f"Processing video note from {user_id} to {partner_id}: file_id={video_note_file_id}")
+                    
+                    # Get the file
+                    video_note_file = await context.bot.get_file(video_note_file_id)
+                    
+                    # Download the file
+                    video_note_bytes = await video_note_file.download_as_bytearray()
+                    
+                    # Send as a new video note
+                    sent = await context.bot.send_video_note(
                         chat_id=int(partner_id),
-                        from_chat_id=update.effective_chat.id,
-                        message_id=update.message.message_id
+                        video_note=video_note_bytes,
+                        length=video_note_length,
+                        duration=video_note_duration
                     )
-                    logger.debug(f"Copied video note from {user_id} to {partner_id}")
+                    
+                    if sent:
+                        logger.info(f"Successfully sent video note from {user_id} to {partner_id}")
+                    
                 except Exception as e:
-                    logger.error(f"Error copying video note: {e}", exc_info=True)
+                    logger.error(f"Error sending video note: {e}", exc_info=True)
                     await update.message.reply_text(
                         "⚠️ Не удалось отправить видео-кружок. Попробуйте еще раз."
                     )
-            elif update.message.photo:
-                # For photos, use copy_message
+            elif update.message.video:
+                # For videos, download and send directly
                 try:
-                    await context.bot.copy_message(
+                    # Get video details
+                    video_file_id = update.message.video.file_id
+                    video_duration = update.message.video.duration
+                    video_width = update.message.video.width
+                    video_height = update.message.video.height
+                    caption = update.message.caption
+                    
+                    logger.info(f"Processing video from {user_id} to {partner_id}: file_id={video_file_id}")
+                    
+                    # Get the file
+                    video_file = await context.bot.get_file(video_file_id)
+                    
+                    # Download the file
+                    video_bytes = await video_file.download_as_bytearray()
+                    
+                    # Send as a new video
+                    sent = await context.bot.send_video(
                         chat_id=int(partner_id),
-                        from_chat_id=update.effective_chat.id,
-                        message_id=update.message.message_id
+                        video=video_bytes,
+                        duration=video_duration,
+                        width=video_width,
+                        height=video_height,
+                        caption=caption
                     )
-                    logger.debug(f"Copied photo from {user_id} to {partner_id}")
+                    
+                    if sent:
+                        logger.info(f"Successfully sent video from {user_id} to {partner_id}")
+                    
                 except Exception as e:
-                    logger.error(f"Error copying photo: {e}", exc_info=True)
+                    logger.error(f"Error sending video: {e}", exc_info=True)
+                    await update.message.reply_text(
+                        "⚠️ Не удалось отправить видео. Попробуйте еще раз."
+                    )
+            elif update.message.photo:
+                # For photos, download and send directly
+                try:
+                    # Get the largest photo (best quality)
+                    photo = update.message.photo[-1]
+                    photo_file_id = photo.file_id
+                    caption = update.message.caption
+                    
+                    logger.info(f"Processing photo from {user_id} to {partner_id}: file_id={photo_file_id}")
+                    
+                    # Get the file
+                    photo_file = await context.bot.get_file(photo_file_id)
+                    
+                    # Download the file
+                    photo_bytes = await photo_file.download_as_bytearray()
+                    
+                    # Send as a new photo
+                    sent = await context.bot.send_photo(
+                        chat_id=int(partner_id),
+                        photo=photo_bytes,
+                        caption=caption
+                    )
+                    
+                    if sent:
+                        logger.info(f"Successfully sent photo from {user_id} to {partner_id}")
+                    
+                except Exception as e:
+                    logger.error(f"Error sending photo: {e}", exc_info=True)
                     await update.message.reply_text(
                         "⚠️ Не удалось отправить фото. Попробуйте еще раз."
                     )
@@ -1414,7 +1470,7 @@ def main() -> None:
                 ],
                 PROFILE: [
                     CallbackQueryHandler(button_handler),
-                    MessageHandler(filters.PHOTO, handle_message)
+                    MessageHandler(filters.ALL & ~filters.COMMAND, handle_message)
                 ],
                 EDIT_PROFILE: [
                     CallbackQueryHandler(button_handler),
