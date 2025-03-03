@@ -1405,19 +1405,20 @@ def main() -> None:
             states={
                 START: [
                     CallbackQueryHandler(button_handler),
-                    MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message)
+                    MessageHandler(filters.ALL & ~filters.COMMAND, handle_message)
                 ],
                 CHATTING: [
                     CallbackQueryHandler(button_handler),
                     CommandHandler("end", end_chat),
-                    MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message)
+                    MessageHandler(filters.ALL & ~filters.COMMAND, handle_message)
                 ],
                 PROFILE: [
-                    CallbackQueryHandler(button_handler)
+                    CallbackQueryHandler(button_handler),
+                    MessageHandler(filters.PHOTO, handle_message)
                 ],
                 EDIT_PROFILE: [
                     CallbackQueryHandler(button_handler),
-                    MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message)
+                    MessageHandler(filters.ALL & ~filters.COMMAND, handle_message)
                 ]
             },
             fallbacks=[CommandHandler("start", start)]
