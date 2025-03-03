@@ -850,23 +850,11 @@ async def continuous_search(user_id: str, context: ContextTypes.DEFAULT_TYPE) ->
             
             # Update search message every 5 seconds
             if seconds % 5 == 0:
-                filter_text = ""
-                if filters:
-                    if filters.get("gender"):
-                        gender_text = "👨 Мужской" if filters["gender"] == "male" else "👩 Женский"
-                        filter_text += f"\n👤 Пол: {gender_text}"
-                    if filters.get("age_min") and filters.get("age_max"):
-                        filter_text += f"\n🎯 Возраст: {filters['age_min']}-{filters['age_max']}"
-                    if filters.get("interests"):
-                        interests_text = ", ".join(filters["interests"])
-                        filter_text += f"\n💭 Интересы: {interests_text}"
-                
                 try:
                     await context.bot.edit_message_text(
                         chat_id=chat_id,
                         message_id=message_id,
-                        text=f"🔍 *Поиск собеседника...*\n\n{time_text}" + 
-                             (f"\n\n*Активные фильтры:*{filter_text}" if filter_text else ""),
+                        text=f"🔍 *Поиск собеседника...*\n\n{time_text}",
                         parse_mode="Markdown",
                         reply_markup=InlineKeyboardMarkup([
                             [InlineKeyboardButton("❌ Отменить поиск", callback_data="cancel_search")]
@@ -875,31 +863,11 @@ async def continuous_search(user_id: str, context: ContextTypes.DEFAULT_TYPE) ->
                 except Exception as e:
                     logger.error(f"Error updating search message: {e}")
             
-            # Find available users matching filters
-            available_users = []
-            for uid in user_data.keys():
-                if uid != user_id and uid not in active_chats and uid not in searching_users:
-                    user_info = user_data[uid]
-                    
-                    # Apply filters
-                    if filters:
-                        # Gender filter
-                        if filters.get("gender") and user_info.get("gender") != filters["gender"]:
-                            continue
-                        
-                        # Age filter
-                        if filters.get("age_min") and filters.get("age_max"):
-                            user_age = user_info.get("age")
-                            if not user_age or not (filters["age_min"] <= user_age <= filters["age_max"]):
-                                continue
-                        
-                        # Interests filter
-                        if filters.get("interests"):
-                            user_interests = user_info.get("interests", [])
-                            if not any(interest in user_interests for interest in filters["interests"]):
-                                continue
-                    
-                    available_users.append(uid)
+            # Find available users (без фильтров)
+            available_users = [uid for uid in user_data.keys() 
+                             if uid != user_id 
+                             and uid not in active_chats 
+                             and uid not in searching_users]
             
             if available_users:
                 # Found a partner!
@@ -918,8 +886,119 @@ async def continuous_search(user_id: str, context: ContextTypes.DEFAULT_TYPE) ->
                 chat_stats[user_id] = ChatStats()
                 chat_stats[partner_id] = ChatStats()
                 
-                # Rest of the existing chat initialization code...
-                # ... existing code ...
+                # Increment chat count for both users
+                user_data[user_id]["chat_count"] = user_data[user_id].get("chat_count", 0) + 1
+                user_data[partner_id]["chat_count"] = user_data[partner_id].get("chat_count", 0) + 1
+                save_user_data(user_data)
+                
+                # Store last partner for rating
+                context.user_data["last_partner"] = partner_id
+                
+                # Get partner info
+                partner_info = user_data.get(partner_id, {})
+                gender = "👨 Мужской" if partner_info.get("gender") == "male" else "👩 Женский" if partner_info.get("gender") == "female" else "Не указан"
+                age = partner_info.get("age", "Не указан")
+                
+                # Prepare partner info message
+                if partner_info.get("gender") or partner_info.get("age"):
+                    partner_text = f"*Информация о собеседнике:*\n\n"
+                    if partner_info.get("gender"):
+                        partner_text += f"*Пол:* {gender}\n"
+                    if partner_info.get("age"):
+                        partner_text += f"*Возраст:* {age}\n"
+                    
+                    interests = partner_info.get("interests", [])
+                    if interests:
+                        interests_text = ""
+                        if "flirt" in interests:
+                            interests_text += "• 💘 Флирт\n"
+                        if "chat" in interests:
+                            interests_text += "• 💬 Общение\n"
+                        partner_text += f"*Интересы:*\n{interests_text}"
+                else:
+                    partner_text = "*Собеседник полностью анонимен*"
+                
+                # Notify both users
+                keyboard = [
+                    [InlineKeyboardButton("⏭️ Пропустить", callback_data="skip_user")],
+                    [InlineKeyboardButton("❌ Завершить чат", callback_data="end_chat")]
+                ]
+                
+                # Send message to the user who initiated the search and pin it
+                try:
+                    await context.bot.edit_message_text(
+                        chat_id=chat_id,
+                        message_id=message_id,
+                        text=f"✅ *Собеседник найден!*\n{time_text}\n\n{partner_text}\n\n*Начните общение прямо сейчас!*",
+                        parse_mode="Markdown",
+                        reply_markup=InlineKeyboardMarkup(keyboard)
+                    )
+                    # Pin the message
+                    await context.bot.pin_chat_message(
+                        chat_id=chat_id,
+                        message_id=message_id,
+                        disable_notification=True
+                    )
+                    # Store pinned message info
+                    context.user_data["pinned_message_id"] = message_id
+                except Exception as e:
+                    logger.error(f"Error sending match notification to user: {e}")
+                    return
+                
+                # Prepare info about the user for the partner
+                user_info = user_data.get(user_id, {})
+                partner_text = f"*Информация о собеседнике:*\n\n"
+                
+                if user_info.get("gender"):
+                    gender = "👨 Мужской" if user_info.get("gender") == "male" else "👩 Женский"
+                    partner_text += f"*Пол:* {gender}\n"
+                if user_info.get("age"):
+                    partner_text += f"*Возраст:* {user_info.get('age')}\n"
+                
+                interests = user_info.get("interests", [])
+                if interests:
+                    interests_text = ""
+                    if "flirt" in interests:
+                        interests_text += "• 💘 Флирт\n"
+                    if "chat" in interests:
+                        interests_text += "• 💬 Общение\n"
+                    partner_text += f"*Интересы:*\n{interests_text}"
+                
+                # Send message to the partner and pin it
+                try:
+                    partner_message = await context.bot.send_message(
+                        chat_id=int(partner_id),
+                        text=f"✅ *Собеседник найден!*\n\n{partner_text}\n\n*Начните общение прямо сейчас!*",
+                        parse_mode="Markdown",
+                        reply_markup=InlineKeyboardMarkup(keyboard)
+                    )
+                    # Pin the message for partner
+                    await context.bot.pin_chat_message(
+                        chat_id=int(partner_id),
+                        message_id=partner_message.message_id,
+                        disable_notification=True
+                    )
+                    # Store pinned message info for partner
+                    context.user_data[f"partner_{partner_id}_pinned_message"] = partner_message.message_id
+                    logger.debug(f"Successfully notified partner {partner_id}")
+                except Exception as e:
+                    logger.error(f"Error notifying partner: {e}")
+                    # If we can't message the partner, disconnect
+                    if user_id in active_chats:
+                        del active_chats[user_id]
+                    if partner_id in active_chats:
+                        del active_chats[partner_id]
+                    
+                    await context.bot.edit_message_text(
+                        chat_id=chat_id,
+                        message_id=message_id,
+                        text="❌ *Ошибка соединения с собеседником*\n\nПопробуйте найти другого собеседника.",
+                        parse_mode="Markdown",
+                        reply_markup=InlineKeyboardMarkup([
+                            [InlineKeyboardButton("🔄 Попробовать снова", callback_data="find_chat")],
+                            [InlineKeyboardButton("👤 Профиль", callback_data="profile")]
+                        ])
+                    )
                 break
             
             # Wait before checking again
