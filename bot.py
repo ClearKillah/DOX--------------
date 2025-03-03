@@ -762,12 +762,11 @@ async def continuous_search(user_id: str, context: ContextTypes.DEFAULT_TYPE) ->
                 except Exception as e:
                     logger.error(f"Error updating search message: {e}")
             
-            # Find available users
+            # Find available users - ONLY those who are also searching
             available_users = []
-            for uid in user_data.keys():
-                if (uid != user_id and 
-                    uid not in active_chats and 
-                    uid not in searching_users):
+            for uid, search_data in searching_users.items():
+                # Skip the current user and users already in chat
+                if uid != user_id and uid not in active_chats:
                     available_users.append(uid)
             
             if available_users:
@@ -775,9 +774,11 @@ async def continuous_search(user_id: str, context: ContextTypes.DEFAULT_TYPE) ->
                 partner_id = random.choice(available_users)
                 logger.debug(f"Matched user {user_id} with partner {partner_id}")
                 
-                # Remove user from searching
+                # Remove both users from searching
                 if user_id in searching_users:
                     del searching_users[user_id]
+                if partner_id in searching_users:
+                    del searching_users[partner_id]
                 
                 # Create chat connection
                 active_chats[user_id] = partner_id
@@ -832,6 +833,11 @@ async def continuous_search(user_id: str, context: ContextTypes.DEFAULT_TYPE) ->
                     )
                     context.user_data["pinned_message_id"] = message_id
                     
+                    # Get partner's search info
+                    partner_search_info = search_info.get(partner_id, {})
+                    partner_chat_id = partner_search_info.get("chat_id")
+                    partner_message_id = partner_search_info.get("message_id")
+                    
                     # Send message to partner
                     user_info = user_data.get(user_id, {})
                     user_text = f"*Информация о собеседнике:*\n\n"
@@ -850,20 +856,42 @@ async def continuous_search(user_id: str, context: ContextTypes.DEFAULT_TYPE) ->
                             interests_text += "• 💬 Общение\n"
                         user_text += f"*Интересы:*\n{interests_text}"
                     
-                    partner_message = await context.bot.send_message(
-                        chat_id=int(partner_id),
-                        text=f"✅ *Собеседник найден!*\n\n{user_text}\n\n*Начните общение прямо сейчас!*",
-                        parse_mode="Markdown",
-                        reply_markup=InlineKeyboardMarkup(keyboard)
-                    )
-                    
-                    # Pin message for partner
-                    await context.bot.pin_chat_message(
-                        chat_id=int(partner_id),
-                        message_id=partner_message.message_id,
-                        disable_notification=True
-                    )
-                    context.user_data[f"partner_{partner_id}_pinned_message"] = partner_message.message_id
+                    # If partner was also searching, edit their search message
+                    if partner_chat_id and partner_message_id:
+                        try:
+                            await context.bot.edit_message_text(
+                                chat_id=partner_chat_id,
+                                message_id=partner_message_id,
+                                text=f"✅ *Собеседник найден!*\n\n{user_text}\n\n*Начните общение прямо сейчас!*",
+                                parse_mode="Markdown",
+                                reply_markup=InlineKeyboardMarkup(keyboard)
+                            )
+                            
+                            # Pin message for partner
+                            await context.bot.pin_chat_message(
+                                chat_id=partner_chat_id,
+                                message_id=partner_message_id,
+                                disable_notification=True
+                            )
+                            context.user_data[f"partner_{partner_id}_pinned_message"] = partner_message_id
+                        except Exception as e:
+                            logger.error(f"Error updating partner's search message: {e}")
+                    else:
+                        # Partner wasn't searching, send a new message
+                        partner_message = await context.bot.send_message(
+                            chat_id=int(partner_id),
+                            text=f"✅ *Собеседник найден!*\n\n{user_text}\n\n*Начните общение прямо сейчас!*",
+                            parse_mode="Markdown",
+                            reply_markup=InlineKeyboardMarkup(keyboard)
+                        )
+                        
+                        # Pin message for partner
+                        await context.bot.pin_chat_message(
+                            chat_id=int(partner_id),
+                            message_id=partner_message.message_id,
+                            disable_notification=True
+                        )
+                        context.user_data[f"partner_{partner_id}_pinned_message"] = partner_message.message_id
                     
                 except Exception as e:
                     logger.error(f"Error notifying users about match: {e}")
@@ -1176,9 +1204,23 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
 
 async def end_chat(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """End the current chat."""
-    user_id = str(update.effective_user.id)
-    
-    if user_id in active_chats:
+    try:
+        user_id = str(update.effective_user.id)
+        
+        # Check if user is in active chat
+        if user_id not in active_chats:
+            keyboard = [
+                [InlineKeyboardButton("🔍 Найти собеседника", callback_data="find_chat")],
+                [InlineKeyboardButton("👤 Профиль", callback_data="profile")]
+            ]
+            
+            await update.effective_message.reply_text(
+                text="❌ *У вас нет активного чата*",
+                reply_markup=InlineKeyboardMarkup(keyboard),
+                parse_mode="Markdown"
+            )
+            return START
+        
         partner_id = active_chats[user_id]
         
         # Update chat statistics
@@ -1186,135 +1228,201 @@ async def end_chat(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
             stats = chat_stats[user_id]
             chat_duration = time.time() - stats.start_time
             
-            # Update average chat duration
-            user_data[user_id]["total_chat_duration"] = user_data[user_id].get("total_chat_duration", 0) + chat_duration
-            user_data[user_id]["chat_count"] = user_data[user_id].get("chat_count", 0) + 1
-            user_data[user_id]["avg_chat_duration"] = (
-                user_data[user_id]["total_chat_duration"] / user_data[user_id]["chat_count"]
-            )
+            # Update user data with chat statistics
+            if user_id in user_data:
+                user_data[user_id]["chat_count"] = user_data[user_id].get("chat_count", 0) + 1
+                user_data[user_id]["total_chat_duration"] = user_data[user_id].get("total_chat_duration", 0) + chat_duration
+                
+                # Calculate average chat duration
+                chat_count = user_data[user_id]["chat_count"]
+                total_duration = user_data[user_id]["total_chat_duration"]
+                user_data[user_id]["avg_chat_duration"] = total_duration / chat_count
+                
+                # Update active days
+                today = datetime.now().strftime("%Y-%m-%d")
+                active_days = user_data[user_id].get("active_days", [])
+                if today not in active_days:
+                    active_days.append(today)
+                    # Keep only last 30 days
+                    if len(active_days) > 30:
+                        active_days = active_days[-30:]
+                user_data[user_id]["active_days"] = active_days
+                
+                save_user_data(user_data)
             
-            # Update active days
-            today = datetime.date.today().isoformat()
-            active_days = user_data[user_id].get("active_days_dates", [])
-            if today not in active_days:
-                active_days.append(today)
-                user_data[user_id]["active_days_dates"] = active_days[-30:]  # Keep last 30 days
-                user_data[user_id]["active_days"] = len(active_days)
-            
-            # Clean up chat stats
+            # Delete chat stats
             del chat_stats[user_id]
         
-        # Store last partner for rating
-        context.user_data["last_partner"] = partner_id
-        
-        # Unpin messages for both users
+        # Unpin messages
         try:
-            # Unpin message for current user
-            pinned_message_id = context.user_data.get("pinned_message_id")
-            if pinned_message_id:
+            if "pinned_message_id" in context.user_data:
                 await context.bot.unpin_chat_message(
                     chat_id=update.effective_chat.id,
-                    message_id=pinned_message_id
+                    message_id=context.user_data["pinned_message_id"]
                 )
                 del context.user_data["pinned_message_id"]
         except Exception as e:
-            logger.error(f"Error unpinning message for user: {e}")
+            logger.error(f"Error unpinning message: {e}")
         
-        # Notify partner and update their stats
-        if partner_id in active_chats:
-            try:
-                # Update partner's statistics
-                if partner_id in chat_stats:
-                    partner_stats = chat_stats[partner_id]
-                    partner_duration = time.time() - partner_stats.start_time
-                    
-                    user_data[partner_id]["total_chat_duration"] = user_data[partner_id].get("total_chat_duration", 0) + partner_duration
-                    user_data[partner_id]["chat_count"] = user_data[partner_id].get("chat_count", 0) + 1
-                    user_data[partner_id]["avg_chat_duration"] = (
-                        user_data[partner_id]["total_chat_duration"] / user_data[partner_id]["chat_count"]
-                    )
-                    
-                    # Update partner's active days
-                    partner_active_days = user_data[partner_id].get("active_days_dates", [])
-                    if today not in partner_active_days:
-                        partner_active_days.append(today)
-                        user_data[partner_id]["active_days_dates"] = partner_active_days[-30:]
-                        user_data[partner_id]["active_days"] = len(partner_active_days)
-                    
-                    del chat_stats[partner_id]
-                
-                # Unpin message for partner
-                partner_pinned_message = context.user_data.get(f"partner_{partner_id}_pinned_message")
-                if partner_pinned_message:
-                    await context.bot.unpin_chat_message(
-                        chat_id=int(partner_id),
-                        message_id=partner_pinned_message
-                    )
-                    del context.user_data[f"partner_{partner_id}_pinned_message"]
-                
-                # Send end chat notification
-                await context.bot.send_message(
-                    chat_id=int(partner_id),
-                    text="❌ *Собеседник завершил чат*\n\nВыберите действие:",
-                    parse_mode="Markdown",
-                    reply_markup=InlineKeyboardMarkup([
-                        [InlineKeyboardButton("🔍 Найти нового собеседника", callback_data="find_chat")],
-                        [InlineKeyboardButton("👤 Профиль", callback_data="profile")]
-                    ])
-                )
-                del active_chats[partner_id]
-            except Exception as e:
-                logger.error(f"Error notifying partner: {e}")
-        
+        # Clean up chat connection
         del active_chats[user_id]
-        save_user_data(user_data)
         
-        # Check and update achievements
-        await update_achievements(user_id, context)
-        await update_achievements(partner_id, context)
+        # Delete all messages in the chat (for the current user)
+        try:
+            # Send a message that will be used to clear the chat
+            clear_message = await context.bot.send_message(
+                chat_id=update.effective_chat.id,
+                text="🧹 *Очистка чата...*",
+                parse_mode="Markdown"
+            )
+            
+            # Delete all messages up to this one
+            for i in range(clear_message.message_id - 1, 0, -1):
+                try:
+                    await context.bot.delete_message(
+                        chat_id=update.effective_chat.id,
+                        message_id=i
+                    )
+                except Exception:
+                    # Ignore errors for messages that can't be deleted
+                    pass
+            
+            # Delete the clear message itself
+            await context.bot.delete_message(
+                chat_id=update.effective_chat.id,
+                message_id=clear_message.message_id
+            )
+        except Exception as e:
+            logger.error(f"Error clearing chat messages: {e}")
         
-        # Ask to rate the partner
+        # Notify the user that chat has ended
         keyboard = [
-            [
-                InlineKeyboardButton("1⭐", callback_data="rate_1"),
-                InlineKeyboardButton("2⭐", callback_data="rate_2"),
-                InlineKeyboardButton("3⭐", callback_data="rate_3"),
-                InlineKeyboardButton("4⭐", callback_data="rate_4"),
-                InlineKeyboardButton("5⭐", callback_data="rate_5")
-            ]
+            [InlineKeyboardButton("🔍 Найти нового собеседника", callback_data="find_chat")],
+            [InlineKeyboardButton("👤 Профиль", callback_data="profile")]
         ]
         
-        # Show chat statistics in rating request
-        if user_id in chat_stats:
-            stats = chat_stats[user_id]
-            duration = int((time.time() - stats.start_time) / 60)
-            stats_text = (
-                f"📊 *Статистика чата:*\n"
-                f"⏱ Длительность: {duration} мин.\n"
-                f"💬 Сообщений отправлено: {stats.message_count}\n\n"
-            )
-        else:
-            stats_text = ""
-        
-        await update.message.reply_text(
-            text=f"*Чат завершен*\n\n{stats_text}Оцените вашего собеседника:",
+        await context.bot.send_message(
+            chat_id=update.effective_chat.id,
+            text="❌ *Чат завершен*\n\nВыберите действие:",
             reply_markup=InlineKeyboardMarkup(keyboard),
             parse_mode="Markdown"
         )
+        
+        # Notify partner that chat has ended and update their stats
+        if partner_id in active_chats:
+            # Update partner's chat statistics
+            if partner_id in chat_stats:
+                partner_stats = chat_stats[partner_id]
+                partner_chat_duration = time.time() - partner_stats.start_time
+                
+                # Update partner data with chat statistics
+                if partner_id in user_data:
+                    user_data[partner_id]["chat_count"] = user_data[partner_id].get("chat_count", 0) + 1
+                    user_data[partner_id]["total_chat_duration"] = user_data[partner_id].get("total_chat_duration", 0) + partner_chat_duration
+                    
+                    # Calculate average chat duration
+                    partner_chat_count = user_data[partner_id]["chat_count"]
+                    partner_total_duration = user_data[partner_id]["total_chat_duration"]
+                    user_data[partner_id]["avg_chat_duration"] = partner_total_duration / partner_chat_count
+                    
+                    # Update active days
+                    today = datetime.now().strftime("%Y-%m-%d")
+                    partner_active_days = user_data[partner_id].get("active_days", [])
+                    if today not in partner_active_days:
+                        partner_active_days.append(today)
+                        # Keep only last 30 days
+                        if len(partner_active_days) > 30:
+                            partner_active_days = partner_active_days[-30:]
+                    user_data[partner_id]["active_days"] = partner_active_days
+                    
+                    save_user_data(user_data)
+                
+                # Delete partner's chat stats
+                del chat_stats[partner_id]
+            
+            # Unpin messages for partner
+            try:
+                if f"partner_{partner_id}_pinned_message" in context.user_data:
+                    await context.bot.unpin_chat_message(
+                        chat_id=int(partner_id),
+                        message_id=context.user_data[f"partner_{partner_id}_pinned_message"]
+                    )
+                    del context.user_data[f"partner_{partner_id}_pinned_message"]
+            except Exception as e:
+                logger.error(f"Error unpinning partner's message: {e}")
+            
+            # Delete all messages in the chat (for the partner)
+            try:
+                # Send a message that will be used to clear the chat
+                partner_clear_message = await context.bot.send_message(
+                    chat_id=int(partner_id),
+                    text="🧹 *Очистка чата...*",
+                    parse_mode="Markdown"
+                )
+                
+                # Delete all messages up to this one
+                for i in range(partner_clear_message.message_id - 1, 0, -1):
+                    try:
+                        await context.bot.delete_message(
+                            chat_id=int(partner_id),
+                            message_id=i
+                        )
+                    except Exception:
+                        # Ignore errors for messages that can't be deleted
+                        pass
+                
+                # Delete the clear message itself
+                await context.bot.delete_message(
+                    chat_id=int(partner_id),
+                    message_id=partner_clear_message.message_id
+                )
+            except Exception as e:
+                logger.error(f"Error clearing partner's chat messages: {e}")
+            
+            # Notify partner that chat has ended
+            await context.bot.send_message(
+                chat_id=int(partner_id),
+                text="❌ *Собеседник завершил чат*\n\nВыберите действие:",
+                reply_markup=InlineKeyboardMarkup(keyboard),
+                parse_mode="Markdown"
+            )
+            
+            # Clean up partner's chat connection
+            del active_chats[partner_id]
+        
+        # Check for achievements
+        await update_achievements(user_id, context)
+        if partner_id in user_data:
+            await update_achievements(partner_id, context)
+        
+        # Ask user to rate the partner
+        rating_keyboard = []
+        for i in range(1, 6):
+            stars = "⭐" * i
+            rating_keyboard.append([InlineKeyboardButton(stars, callback_data=f"rate_{partner_id}_{i}")])
+        
+        rating_keyboard.append([InlineKeyboardButton("Пропустить", callback_data="skip_rating")])
+        
+        # Include chat statistics in rating request
+        chat_duration_minutes = int(chat_duration / 60)
+        message_count = user_data[user_id].get("total_messages", 0) - user_data[user_id].get("prev_total_messages", 0)
+        user_data[user_id]["prev_total_messages"] = user_data[user_id].get("total_messages", 0)
+        
+        await context.bot.send_message(
+            chat_id=update.effective_chat.id,
+            text=f"📊 *Статистика чата:*\n"
+                 f"⏱ Длительность: {chat_duration_minutes} мин.\n"
+                 f"💬 Сообщений: {message_count}\n\n"
+                 f"Оцените вашего собеседника:",
+            reply_markup=InlineKeyboardMarkup(rating_keyboard),
+            parse_mode="Markdown"
+        )
+        
         return START
-    
-    keyboard = [
-        [
-            InlineKeyboardButton("👤 Профиль", callback_data="profile"),
-            InlineKeyboardButton("🔍 Найти собеседника", callback_data="find_chat")
-        ]
-    ]
-    
-    await update.message.reply_text(
-        text="У вас нет активного чата.",
-        reply_markup=InlineKeyboardMarkup(keyboard)
-    )
-    return START
+        
+    except Exception as e:
+        logger.error(f"Error in end_chat: {e}", exc_info=True)
+        return START
 
 async def save_avatar(user_id: str, photo_file) -> str:
     """Save user's avatar photo."""
