@@ -154,31 +154,58 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
         rating = user_data[user_id].get("rating", 0)
         rating_stars = "⭐" * int(rating) + "☆" * (5 - int(rating))
         
-        # Create welcome message
+        # Create a more visually appealing welcome message
         welcome_text = (
+            f"*Добро пожаловать в DOX Анонимный Чат!* 🎭\n\n"
             f"👋 Привет, {update.effective_user.first_name}!\n\n"
-            f"Добро пожаловать в Dox: Анонимный Чат!\n\n"
-            f"Здесь ты можешь анонимно общаться с другими пользователями. "
-            f"Используй кнопки ниже для навигации."
+            f"🔒 *Анонимность гарантирована*\n"
+            f"💬 *Мгновенный поиск собеседников*\n"
+            f"🌐 *Общение без границ*\n\n"
         )
         
         # Add user stats if they have any chats
         if chat_count > 0:
             welcome_text += (
-                f"📊 Количество чатов: {chat_count}\n"
+                f"📊 *Ваша статистика:*\n"
+                f"• Количество чатов: {chat_count}\n"
             )
             if rating > 0:
-                welcome_text += f"📈 Рейтинг: {rating_stars} ({rating:.1f}/5)\n"
+                welcome_text += f"• Рейтинг: {rating_stars} ({rating:.1f}/5)\n"
             welcome_text += "\n"
         
-        welcome_text += "*Выберите действие:*"
+        welcome_text += "🔽 *Выберите действие:* 🔽"
         
-        logger.debug("Sending welcome message to user %s", user_id)
-        await update.message.reply_text(
-            welcome_text,
-            reply_markup=reply_markup,
-            parse_mode="Markdown"
-        )
+        logger.debug("Sending welcome message with logo to user %s", user_id)
+        
+        # Check if logo file exists
+        logo_path = "images/logo.png"
+        if os.path.exists(logo_path):
+            # Send logo with caption
+            try:
+                with open(logo_path, "rb") as photo:
+                    await context.bot.send_photo(
+                        chat_id=update.effective_chat.id,
+                        photo=photo,
+                        caption=welcome_text,
+                        reply_markup=reply_markup,
+                        parse_mode="Markdown"
+                    )
+            except Exception as e:
+                logger.error(f"Error sending photo: {e}", exc_info=True)
+                # Fallback to text-only message if photo fails
+                await update.message.reply_text(
+                    welcome_text,
+                    reply_markup=reply_markup,
+                    parse_mode="Markdown"
+                )
+        else:
+            # No logo file, send text-only message
+            await update.message.reply_text(
+                welcome_text,
+                reply_markup=reply_markup,
+                parse_mode="Markdown"
+            )
+        
         logger.debug("Welcome message sent successfully")
         
         return START

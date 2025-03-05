@@ -1,0 +1,2 @@
+This is a placeholder for the logo image file. Please replace this with an actual logo image file.
+The logo should ideally be a PNG or JPG file with dimensions around 500x300 pixels. 
