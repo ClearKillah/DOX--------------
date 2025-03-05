@@ -23,7 +23,7 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # Conversation states
-START, CHATTING, PROFILE, EDIT_PROFILE = range(4)
+START, CHATTING, PROFILE, EDIT_PROFILE, GROUP_CHATTING = range(5)
 
 # User data file
 USER_DATA_FILE = "user_data.json"
@@ -46,6 +46,11 @@ active_chats = {}  # Store active chat pairs
 searching_users = {}  # Store users who are currently searching
 chat_stats = {}  # Store chat statistics and message counts
 
+# Group chat related variables
+group_chats = {}  # Store active group chats: {group_id: {members: [user_ids], name: "name", creator: "user_id"}}
+group_searching_users = {}  # Store users looking for group chat: {user_id: {timestamp, message_id, max_members: int}}
+GROUP_MAX_MEMBERS = 10  # Maximum number of members in a group
+
 # Constants for achievements
 ACHIEVEMENTS = {
     "CHAT_MASTER": {"name": "💬 Мастер общения", "description": "Проведено 50 чатов", "requirement": 50},
@@ -66,6 +71,7 @@ TOKEN = os.getenv("TELEGRAM_TOKEN")
 
 # Constants for buttons
 FIND_PARTNER = "🔍 Найти собеседника"
+FIND_GROUP = "👥 Найти групповой чат"
 END_CHAT = "🚫 Завершить чат"
 MY_PROFILE = "👤 Мой профиль"
 HELP = "❓ Помощь"
@@ -75,6 +81,7 @@ CALLBACK_RATE = "rate_"
 CALLBACK_GENDER = "gender_"
 CALLBACK_AGE = "age_"
 CALLBACK_INTEREST = "interest_"
+CALLBACK_GROUP = "group_"
 
 # Interests
 INTERESTS = [
@@ -145,6 +152,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
                 InlineKeyboardButton("👤 Профиль", callback_data="profile"),
                 InlineKeyboardButton("🔍 Найти собеседника", callback_data="find_chat")
             ],
+            [InlineKeyboardButton("👥 Групповой чат", callback_data="group_find")],
             [InlineKeyboardButton("ℹ️ Помощь", callback_data="help")]
         ]
         reply_markup = InlineKeyboardMarkup(keyboard)
@@ -361,6 +369,30 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         )
         return START
     
+    # Handle interest edit button
+    elif query.data == "interest_edit":
+        keyboard = [
+            [InlineKeyboardButton("💘 Флирт", callback_data="interest_flirt")],
+            [InlineKeyboardButton("💬 Общение", callback_data="interest_chat")],
+            [InlineKeyboardButton("🔙 Назад к профилю", callback_data="profile")]
+        ]
+        
+        # Get current interests to show selection state
+        if user_id in user_data:
+            interests = user_data[user_id].get("interests", [])
+            keyboard = [
+                [InlineKeyboardButton("💘 Флирт " + ("✅" if "flirt" in interests else ""), callback_data="interest_flirt")],
+                [InlineKeyboardButton("💬 Общение " + ("✅" if "chat" in interests else ""), callback_data="interest_chat")],
+                [InlineKeyboardButton("🔙 Назад к профилю", callback_data="profile")]
+            ]
+        
+        await query.edit_message_text(
+            text="*Выберите ваши интересы:*\n\nВыбранные интересы помогают находить собеседников со схожими интересами.",
+            reply_markup=InlineKeyboardMarkup(keyboard),
+            parse_mode="Markdown"
+        )
+        return PROFILE
+    
     # Handle interest selection
     elif query.data.startswith("interest_"):
         interest = query.data.split("_")[1]
@@ -382,6 +414,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     # Handle edit profile
     elif query.data == "edit_profile":
         keyboard = [
+            [InlineKeyboardButton("👨👩 Изменить пол", callback_data="edit_gender")],
             [InlineKeyboardButton("✏️ Изменить возраст", callback_data="edit_age")],
             [InlineKeyboardButton("🖼 Загрузить аватар", callback_data="upload_avatar")],
             [InlineKeyboardButton("🔙 Назад к профилю", callback_data="profile")]
@@ -389,6 +422,37 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         
         await query.edit_message_text(
             text="*Редактирование профиля*\n\nВыберите, что хотите изменить:",
+            reply_markup=InlineKeyboardMarkup(keyboard),
+            parse_mode="Markdown"
+        )
+        return EDIT_PROFILE
+        
+    elif query.data == "edit_gender":
+        keyboard = [
+            [InlineKeyboardButton("👨 Мужской", callback_data="gender_male")],
+            [InlineKeyboardButton("👩 Женский", callback_data="gender_female")],
+            [InlineKeyboardButton("🔙 Назад", callback_data="edit_profile")]
+        ]
+        
+        await query.edit_message_text(
+            text="*Выберите ваш пол:*",
+            reply_markup=InlineKeyboardMarkup(keyboard),
+            parse_mode="Markdown"
+        )
+        return EDIT_PROFILE
+        
+    elif query.data.startswith("gender_"):
+        gender = query.data.split("_")[1]
+        if user_id in user_data:
+            user_data[user_id]["gender"] = gender
+            save_user_data(user_data)
+            
+        keyboard = [
+            [InlineKeyboardButton("👤 Вернуться к профилю", callback_data="profile")],
+        ]
+        
+        await query.edit_message_text(
+            text=f"✅ *Пол успешно обновлен!*\n\nВаш текущий пол: {'👨 Мужской' if gender == 'male' else '👩 Женский'}",
             reply_markup=InlineKeyboardMarkup(keyboard),
             parse_mode="Markdown"
         )
