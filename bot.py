@@ -241,6 +241,51 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     elif query.data == "find_chat":
         return await find_chat(update, context)
     
+    elif query.data == "group_find":
+        # Handle group chat initiation
+        return await find_group_chat(update, context)
+    
+    elif query.data == "group_create":
+        # Create a new group
+        return await create_group_chat(update, context)
+    
+    elif query.data == "group_join":
+        # Join an existing group
+        return await join_group_chat(update, context)
+    
+    elif query.data.startswith("group_leave_"):
+        # Handle group leave request
+        group_id = query.data.split("group_leave_")[1]
+        return await leave_group_chat(update, context, group_id)
+    
+    elif query.data.startswith("group_invite_"):
+        # Show invite code for a group
+        group_id = query.data.split("group_invite_")[1]
+        
+        if group_id not in group_chats:
+            await query.edit_message_text(
+                text="❌ *Группа не найдена*",
+                parse_mode="Markdown"
+            )
+            return START
+        
+        invite_code = group_chats[group_id].get("invite_code")
+        
+        keyboard = [
+            [InlineKeyboardButton("🚪 Покинуть группу", callback_data=f"group_leave_{group_id}")],
+            [InlineKeyboardButton("🔙 Назад", callback_data="back_to_start")]
+        ]
+        
+        await query.edit_message_text(
+            text=f"👥 *Код приглашения в группу*\n\n"
+                 f"Поделитесь этим кодом с друзьями:\n"
+                 f"`{invite_code}`\n\n"
+                 f"Участники: {len(group_chats[group_id]['members'])}/{GROUP_MAX_MEMBERS}",
+            reply_markup=InlineKeyboardMarkup(keyboard),
+            parse_mode="Markdown"
+        )
+        return GROUP_CHATTING
+    
     elif query.data == "cancel_search":
         # Remove user from searching list
         if user_id in searching_users:
@@ -1794,6 +1839,360 @@ async def update_achievements(user_id: str, context: ContextTypes.DEFAULT_TYPE):
         except Exception as e:
             logger.error(f"Error sending achievement notification: {e}")
 
+async def find_group_chat(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Start looking for a group chat or create a new one."""
+    query = update.callback_query
+    user_id = str(query.from_user.id)
+    
+    # Check if user is already in a chat
+    if user_id in active_chats:
+        partner_id = active_chats[user_id]
+        
+        # End the current chat first
+        await end_chat_session(user_id, partner_id, context, reason="user_choice")
+        
+        # Notify the user
+        await query.edit_message_text(
+            text="✅ *Ваш текущий чат завершен*",
+            parse_mode="Markdown"
+        )
+    
+    # Check if user is already in a group chat
+    user_in_group = False
+    group_id_for_user = None
+    
+    for group_id, group_info in group_chats.items():
+        if user_id in group_info["members"]:
+            user_in_group = True
+            group_id_for_user = group_id
+            break
+    
+    if user_in_group:
+        keyboard = [
+            [InlineKeyboardButton("🚪 Покинуть группу", callback_data=f"group_leave_{group_id_for_user}")],
+            [InlineKeyboardButton("🔙 Назад", callback_data="back_to_start")]
+        ]
+        
+        await query.edit_message_text(
+            text="⚠️ *Вы уже находитесь в групповом чате*\n\n"
+                 "Вы можете продолжить общение или покинуть группу.",
+            reply_markup=InlineKeyboardMarkup(keyboard),
+            parse_mode="Markdown"
+        )
+        return GROUP_CHATTING
+    
+    # Options for group chat
+    keyboard = [
+        [InlineKeyboardButton("🆕 Создать новую группу", callback_data="group_create")],
+        [InlineKeyboardButton("🔍 Присоединиться к группе", callback_data="group_join")],
+        [InlineKeyboardButton("🔙 Назад", callback_data="back_to_start")]
+    ]
+    
+    await query.edit_message_text(
+        text="👥 *Групповой чат*\n\n"
+             "Выберите, что вы хотите сделать:",
+        reply_markup=InlineKeyboardMarkup(keyboard),
+        parse_mode="Markdown"
+    )
+    return START
+
+
+async def create_group_chat(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Create a new group chat."""
+    query = update.callback_query
+    user_id = str(query.from_user.id)
+    
+    # Create a new group ID
+    group_id = f"group_{int(time.time())}_{user_id}"
+    
+    # Initialize the group with the creator as the first member
+    group_chats[group_id] = {
+        "members": [user_id],
+        "name": f"Группа #{len(group_chats) + 1}",
+        "creator": user_id,
+        "created_at": time.time()
+    }
+    
+    # Generate invite code
+    invite_code = f"{random.randint(1000, 9999)}"
+    group_chats[group_id]["invite_code"] = invite_code
+    
+    keyboard = [
+        [InlineKeyboardButton("🚪 Покинуть группу", callback_data=f"group_leave_{group_id}")],
+        [InlineKeyboardButton("👥 Пригласить в группу", callback_data=f"group_invite_{group_id}")],
+        [InlineKeyboardButton("🔙 Назад", callback_data="back_to_start")]
+    ]
+    
+    await query.edit_message_text(
+        text=f"✅ *Групповой чат создан!*\n\n"
+             f"Название: {group_chats[group_id]['name']}\n"
+             f"Код приглашения: `{invite_code}`\n\n"
+             f"Участники (1/{GROUP_MAX_MEMBERS}):\n"
+             f"• {query.from_user.first_name}\n\n"
+             f"Отправьте код другим пользователям, чтобы они могли присоединиться.\n"
+             f"Все сообщения в этом чате анонимны.",
+        reply_markup=InlineKeyboardMarkup(keyboard),
+        parse_mode="Markdown"
+    )
+    
+    return GROUP_CHATTING
+
+
+async def join_group_chat(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Handle request to join a group chat."""
+    query = update.callback_query
+    
+    await query.edit_message_text(
+        text="🔍 *Присоединение к группе*\n\n"
+             "Введите код приглашения, который вам прислал создатель группы.",
+        parse_mode="Markdown"
+    )
+    
+    context.user_data["joining_group"] = True
+    return GROUP_CHATTING
+
+
+async def handle_group_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Handle messages in group chats."""
+    user_id = str(update.effective_user.id)
+    
+    # Find which group this user is in
+    user_group = None
+    for group_id, group_info in group_chats.items():
+        if user_id in group_info["members"]:
+            user_group = group_id
+            break
+    
+    if not user_group:
+        # User is not in a group but tried to send a message
+        keyboard = [
+            [InlineKeyboardButton("👥 Групповой чат", callback_data="group_find")],
+            [InlineKeyboardButton("🔙 Главное меню", callback_data="back_to_start")]
+        ]
+        
+        await update.message.reply_text(
+            text="⚠️ *Вы не состоите в групповом чате*\n\n"
+                 "Чтобы отправить сообщение, сначала присоединитесь к группе.",
+            reply_markup=InlineKeyboardMarkup(keyboard),
+            parse_mode="Markdown"
+        )
+        return START
+    
+    # Check if user is trying to join a group using invite code
+    if context.user_data.get("joining_group") and update.message.text:
+        # User is entering an invite code
+        invite_code = update.message.text.strip()
+        
+        # Find the group with this invite code
+        target_group = None
+        for group_id, group_info in group_chats.items():
+            if group_info.get("invite_code") == invite_code:
+                target_group = group_id
+                break
+        
+        if not target_group:
+            await update.message.reply_text(
+                text="❌ *Неверный код приглашения*\n\n"
+                     "Проверьте код и попробуйте снова, или создайте свою группу.",
+                parse_mode="Markdown"
+            )
+            return GROUP_CHATTING
+        
+        # Check if group is full
+        if len(group_chats[target_group]["members"]) >= GROUP_MAX_MEMBERS:
+            await update.message.reply_text(
+                text="⚠️ *Группа заполнена*\n\n"
+                     "В этой группе уже максимальное количество участников.",
+                parse_mode="Markdown"
+            )
+            return GROUP_CHATTING
+        
+        # Add user to group
+        group_chats[target_group]["members"].append(user_id)
+        
+        # Remove the joining_group flag
+        del context.user_data["joining_group"]
+        
+        # Notify user
+        keyboard = [
+            [InlineKeyboardButton("🚪 Покинуть группу", callback_data=f"group_leave_{target_group}")],
+            [InlineKeyboardButton("🔙 Назад", callback_data="back_to_start")]
+        ]
+        
+        await update.message.reply_text(
+            text=f"✅ *Вы присоединились к группе!*\n\n"
+                 f"Название: {group_chats[target_group]['name']}\n"
+                 f"Участники: {len(group_chats[target_group]['members'])}/{GROUP_MAX_MEMBERS}\n\n"
+                 f"Все сообщения в этом чате анонимны.",
+            reply_markup=InlineKeyboardMarkup(keyboard),
+            parse_mode="Markdown"
+        )
+        
+        # Notify other members that someone joined
+        group_members = group_chats[target_group]["members"]
+        for member_id in group_members:
+            if member_id != user_id:  # Don't notify the user who just joined
+                try:
+                    await context.bot.send_message(
+                        chat_id=int(member_id),
+                        text=f"👋 *Новый участник присоединился к группе!*\n\n"
+                             f"В группе теперь {len(group_members)} участников.",
+                        parse_mode="Markdown"
+                    )
+                except Exception as e:
+                    logger.error(f"Error notifying group member {member_id}: {e}")
+        
+        return GROUP_CHATTING
+    
+    # Handle regular group message
+    group_members = group_chats[user_group]["members"]
+    
+    # Construct anonymous name (same for each user in the group)
+    anonymous_name = f"Аноним {group_members.index(user_id) + 1}"
+    
+    # Forward the message to all other group members
+    for member_id in group_members:
+        if member_id != user_id:  # Don't send back to the sender
+            try:
+                # Forward different types of messages
+                if update.message.text:
+                    await context.bot.send_message(
+                        chat_id=int(member_id),
+                        text=f"{anonymous_name}: {update.message.text}"
+                    )
+                # Handle various media types similar to handle_message function
+                elif update.message.voice:
+                    voice = update.message.voice
+                    timestamp = int(time.time())
+                    
+                    try:
+                        voice_file = await context.bot.get_file(voice.file_id)
+                        temp_file_path = f"temp/voice_{user_id}_{timestamp}.ogg"
+                        
+                        # Download the voice message
+                        await voice_file.download_to_drive(temp_file_path)
+                        
+                        # Send as a new voice message
+                        with open(temp_file_path, "rb") as audio:
+                            await context.bot.send_voice(
+                                chat_id=int(member_id),
+                                voice=InputFile(audio),
+                                caption=f"{anonymous_name}",
+                                duration=voice.duration
+                            )
+                        
+                        # Clean up the temporary file
+                        if os.path.exists(temp_file_path):
+                            os.remove(temp_file_path)
+                            
+                    except Exception as e:
+                        logger.error(f"Error handling voice message in group: {e}")
+                        continue
+                elif update.message.photo:
+                    photo = update.message.photo[-1]  # Get the largest photo
+                    caption = update.message.caption or ""
+                    timestamp = int(time.time())
+                    
+                    try:
+                        photo_file = await context.bot.get_file(photo.file_id)
+                        temp_file_path = f"temp/photo_{user_id}_{timestamp}.jpg"
+                        
+                        # Download the photo
+                        await photo_file.download_to_drive(temp_file_path)
+                        
+                        # Send as a new photo
+                        with open(temp_file_path, "rb") as img:
+                            await context.bot.send_photo(
+                                chat_id=int(member_id),
+                                photo=InputFile(img),
+                                caption=f"{anonymous_name}: {caption}" if caption else anonymous_name
+                            )
+                        
+                        # Clean up the temporary file
+                        if os.path.exists(temp_file_path):
+                            os.remove(temp_file_path)
+                            
+                    except Exception as e:
+                        logger.error(f"Error handling photo in group: {e}")
+                        continue
+                # Can add handlers for other media types as well
+                
+            except Exception as e:
+                logger.error(f"Error sending message to group member {member_id}: {e}")
+    
+    # Update message count for statistics
+    if user_id in user_data:
+        user_data[user_id]["total_messages"] = user_data[user_id].get("total_messages", 0) + 1
+        save_user_data(user_data)
+    
+    return GROUP_CHATTING
+
+
+async def leave_group_chat(update: Update, context: ContextTypes.DEFAULT_TYPE, group_id: str) -> int:
+    """Handle a user leaving a group chat."""
+    query = update.callback_query
+    user_id = str(query.from_user.id)
+    
+    if group_id not in group_chats:
+        await query.edit_message_text(
+            text="❌ *Группа не найдена*\n\n"
+                 "Эта группа больше не существует.",
+            parse_mode="Markdown"
+        )
+        return START
+    
+    # Check if user is in this group
+    if user_id not in group_chats[group_id]["members"]:
+        await query.edit_message_text(
+            text="❌ *Вы не состоите в этой группе*",
+            parse_mode="Markdown"
+        )
+        return START
+    
+    # Remove user from group
+    group_chats[group_id]["members"].remove(user_id)
+    
+    # Notify the user
+    await query.edit_message_text(
+        text="✅ *Вы вышли из группового чата*",
+        parse_mode="Markdown"
+    )
+    
+    # If group is empty, delete it
+    if not group_chats[group_id]["members"]:
+        del group_chats[group_id]
+        return START
+    
+    # If the creator left, assign a new creator
+    if user_id == group_chats[group_id]["creator"]:
+        group_chats[group_id]["creator"] = group_chats[group_id]["members"][0]
+    
+    # Notify other members that someone left
+    group_members = group_chats[group_id]["members"]
+    for member_id in group_members:
+        try:
+            await context.bot.send_message(
+                chat_id=int(member_id),
+                text=f"👋 *Участник покинул группу*\n\n"
+                     f"В группе осталось {len(group_members)} участников.",
+                parse_mode="Markdown"
+            )
+        except Exception as e:
+            logger.error(f"Error notifying group member {member_id} about user leaving: {e}")
+    
+    return START
+
+
+async def end_chat_session(user_id: str, partner_id: str, context: ContextTypes.DEFAULT_TYPE, reason: str = "user_choice") -> None:
+    """End an active chat session between two users."""
+    # Remove users from active chats
+    if user_id in active_chats:
+        del active_chats[user_id]
+    if partner_id in active_chats:
+        del active_chats[partner_id]
+    
+    # Code for rating and closing the chat continues...
+
 def main() -> None:
     """Start the bot."""
     try:
@@ -1831,6 +2230,11 @@ def main() -> None:
                 EDIT_PROFILE: [
                     CallbackQueryHandler(button_handler),
                     MessageHandler(filters.ALL & ~filters.COMMAND, handle_message)
+                ],
+                GROUP_CHATTING: [
+                    CallbackQueryHandler(button_handler),
+                    MessageHandler(filters.VOICE, handle_group_message),  # Explicit handler for voice messages
+                    MessageHandler(filters.ALL & ~filters.COMMAND, handle_group_message)
                 ]
             },
             fallbacks=[CommandHandler("start", start)]
