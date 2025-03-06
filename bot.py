@@ -1941,14 +1941,87 @@ async def create_group_chat(update: Update, context: ContextTypes.DEFAULT_TYPE) 
 async def join_group_chat(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Handle request to join a group chat."""
     query = update.callback_query
+    user_id = str(query.from_user.id)
+    
+    # Count active groups and members
+    active_groups = len(group_chats)
+    total_members = sum(len(info["members"]) for info in group_chats.values())
+    
+    # Prepare the list of active groups
+    group_list_text = ""
+    keyboard = []
+    for group_id, group_info in group_chats.items():
+        member_count = len(group_info["members"])
+        group_list_text += f"• {group_info['name']} ({member_count}/{GROUP_MAX_MEMBERS})\n"
+        keyboard.append([InlineKeyboardButton(f"Вступить в {group_info['name']}", callback_data=f"group_join_{group_id}")])
+    
+    if not group_list_text:
+        group_list_text = "Нет активных групповых чатов. Создайте новый!"
+    
+    # Add a back button
+    keyboard.append([InlineKeyboardButton("🔙 Назад", callback_data="back_to_start")])
     
     await query.edit_message_text(
-        text="🔍 *Присоединение к группе*\n\n"
-             "Введите код приглашения, который вам прислал создатель группы.",
+        text=f"👥 *Присоединение к группе*\n\n"
+             f"Активных групп: {active_groups}\n"
+             f"Всего участников: {total_members}\n\n"
+             f"{group_list_text}",
+        reply_markup=InlineKeyboardMarkup(keyboard),
         parse_mode="Markdown"
     )
     
-    context.user_data["joining_group"] = True
+    return GROUP_CHATTING
+
+
+async def handle_group_join(update: Update, context: ContextTypes.DEFAULT_TYPE, group_id: str) -> int:
+    """Handle joining a specific group chat by ID."""
+    user_id = str(update.effective_user.id)
+    
+    if group_id not in group_chats:
+        await update.message.reply_text(
+            text="❌ *Группа не найдена*",
+            parse_mode="Markdown"
+        )
+        return GROUP_CHATTING
+    
+    # Check if group is full
+    if len(group_chats[group_id]["members"]) >= GROUP_MAX_MEMBERS:
+        await update.message.reply_text(
+            text="⚠️ *Группа заполнена*\n\n"
+                 "В этой группе уже максимальное количество участников.",
+            parse_mode="Markdown"
+        )
+        return GROUP_CHATTING
+    
+    # Add user to group
+    group_chats[group_id]["members"].append(user_id)
+    
+    # Notify user
+    group_info = group_chats[group_id]
+    member_names = [context.bot.get_chat(int(member_id)).first_name for member_id in group_info["members"]]
+    member_list = "\n".join(f"• {name}" for name in member_names)
+    
+    await update.message.reply_text(
+        text=f"✅ *Вы присоединились к группе!*\n\n"
+             f"Название: {group_info['name']}\n"
+             f"Участники: {len(group_info['members'])}/{GROUP_MAX_MEMBERS}\n\n"
+             f"Текущие участники:\n{member_list}",
+        parse_mode="Markdown"
+    )
+    
+    # Notify other members that someone joined
+    for member_id in group_info["members"]:
+        if member_id != user_id:  # Don't notify the user who just joined
+            try:
+                await context.bot.send_message(
+                    chat_id=int(member_id),
+                    text=f"👋 *Новый участник присоединился к группе!*\n\n"
+                         f"В группе теперь {len(group_info['members'])} участников.",
+                    parse_mode="Markdown"
+                )
+            except Exception as e:
+                logger.error(f"Error notifying group member {member_id}: {e}")
+    
     return GROUP_CHATTING
 
 
