@@ -896,11 +896,17 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
             save_user_data(user_data)
             
         keyboard = [
-            [InlineKeyboardButton("👤 Вернуться к профилю", callback_data="profile")],
+            [InlineKeyboardButton("👨👩 Изменить пол", callback_data="edit_gender")],
+            [InlineKeyboardButton("✏️ Изменить возраст", callback_data="edit_age")],
+            [InlineKeyboardButton("🖼 Загрузить аватар", callback_data="upload_avatar")],
+            [InlineKeyboardButton("🔙 Назад к профилю", callback_data="profile")]
         ]
         
         await query.edit_message_text(
-            text=f"✅ *Пол успешно обновлен!*\n\nВаш текущий пол: {'👨 Мужской' if gender == 'male' else '👩 Женский'}",
+            text=f"✅ *Пол успешно обновлен!*\n\n"
+                 f"Ваш текущий пол: {'👨 Мужской' if gender == 'male' else '👩 Женский'}\n\n"
+                 f"*Редактирование профиля*\n\n"
+                 f"Выберите, что хотите изменить:",
             reply_markup=InlineKeyboardMarkup(keyboard),
             parse_mode="Markdown"
         )
@@ -1109,24 +1115,56 @@ async def handle_avatar_upload(update: Update, context: ContextTypes.DEFAULT_TYP
     user_id = str(update.effective_user.id)
     
     if update.message and update.message.photo:
-        photo_file = await update.message.photo[-1].get_file()
-        avatar_path = await save_avatar(user_id, photo_file)
-        
-        if avatar_path:
+        try:
+            # Get the largest photo (best quality)
+            photo = update.message.photo[-1]
+            photo_file_id = photo.file_id
+            
+            # Create avatars directory if it doesn't exist
+            os.makedirs("avatars", exist_ok=True)
+            
+            # Save avatar
+            avatar_path = await save_avatar(user_id, photo_file_id)
+            
+            if avatar_path:
+                # Show success message and return to profile
+                keyboard = [
+                    [
+                        InlineKeyboardButton("✏️ Изменить профиль", callback_data="edit_profile"),
+                        InlineKeyboardButton("📸 Аватар", callback_data="upload_avatar")
+                    ],
+                    [
+                        InlineKeyboardButton("🔄 Интересы", callback_data="interest_edit"),
+                        InlineKeyboardButton("📈 Статистика", callback_data="show_stats")
+                    ],
+                    [InlineKeyboardButton("⬅️ Вернуться в меню", callback_data="back_to_start")]
+                ]
+                
+                await update.message.reply_text(
+                    text="✅ *Аватар успешно обновлен!*",
+                    reply_markup=InlineKeyboardMarkup(keyboard),
+                    parse_mode="Markdown"
+                )
+                return PROFILE
+            else:
+                await update.message.reply_text(
+                    text="❌ *Ошибка при сохранении аватара*\n\nПожалуйста, попробуйте еще раз.",
+                    parse_mode="Markdown"
+                )
+                return PROFILE
+                
+        except Exception as e:
+            logger.error(f"Error handling avatar upload: {e}", exc_info=True)
             await update.message.reply_text(
-                "✅ Аватар успешно обновлен!\n\nВозвращаемся к профилю...",
-                reply_markup=InlineKeyboardMarkup([[
-                    InlineKeyboardButton("👤 Показать профиль", callback_data="profile")
-                ]])
+                text="❌ *Произошла ошибка при загрузке аватара*\n\nПожалуйста, попробуйте еще раз.",
+                parse_mode="Markdown"
             )
-        else:
-            await update.message.reply_text(
-                "❌ Произошла ошибка при сохранении аватара. Попробуйте позже."
-            )
+            return PROFILE
     else:
         await update.message.reply_text(
-            "📸 Отправьте фотографию, которую хотите использовать как аватар.\n"
-            "Или нажмите /cancel для отмены."
+            text="📸 *Отправьте фотографию, которую хотите использовать как аватар.*\n\n"
+                 "Или нажмите /cancel для отмены.",
+            parse_mode="Markdown"
         )
     
     return PROFILE
@@ -1430,14 +1468,16 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
                 user_data[user_id]["age"] = age
                 save_user_data(user_data)
                 
+                # Send response back to edit profile menu
                 keyboard = [
-                    [InlineKeyboardButton("💘 Флирт", callback_data="interest_flirt")],
-                    [InlineKeyboardButton("💬 Общение", callback_data="interest_chat")],
+                    [InlineKeyboardButton("👨👩 Изменить пол", callback_data="edit_gender")],
+                    [InlineKeyboardButton("✏️ Изменить возраст", callback_data="edit_age")],
+                    [InlineKeyboardButton("🖼 Загрузить аватар", callback_data="upload_avatar")],
                     [InlineKeyboardButton("🔙 Назад к профилю", callback_data="profile")]
                 ]
                 
                 await update.message.reply_text(
-                    text="✅ *Возраст успешно обновлен!*\n\n*Выберите ваши интересы:*",
+                    text=f"✅ *Возраст успешно обновлен на {age}!*\n\n*Редактирование профиля*\n\nВыберите, что хотите изменить:",
                     reply_markup=InlineKeyboardMarkup(keyboard),
                     parse_mode="Markdown"
                 )
