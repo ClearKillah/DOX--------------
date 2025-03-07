@@ -135,7 +135,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
         user_id = str(update.effective_user.id)
         
         # Check if user is subscribed to the channel
-        channel_username = "@tvoyznaklove_bot"
+        channel_username = "@tvoyznaklove"
         try:
             member = await context.bot.get_chat_member(chat_id=channel_username, user_id=user_id)
             if member.status not in ['member', 'administrator', 'creator']:
