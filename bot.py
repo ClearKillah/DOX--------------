@@ -1425,12 +1425,14 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         try:
             age = int(update.message.text)
             if 13 <= age <= 100:  # Basic age validation
+                if user_id not in user_data:
+                    user_data[user_id] = {}
                 user_data[user_id]["age"] = age
                 save_user_data(user_data)
                 
                 keyboard = [
-                    [InlineKeyboardButton("Флирт", callback_data="interest_flirt")],
-                    [InlineKeyboardButton("Общение", callback_data="interest_chat")],
+                    [InlineKeyboardButton("💘 Флирт", callback_data="interest_flirt")],
+                    [InlineKeyboardButton("💬 Общение", callback_data="interest_chat")],
                     [InlineKeyboardButton("🔙 Назад к профилю", callback_data="profile")]
                 ]
                 
@@ -1443,12 +1445,24 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
                 return EDIT_PROFILE
             else:
                 await update.message.reply_text(
-                    "⚠️ Пожалуйста, введите корректный возраст (от 13 до 100)."
+                    "⚠️ Пожалуйста, введите корректный возраст (от 13 до 100).\n\n"
+                    "Попробуйте еще раз или нажмите /cancel для отмены.",
+                    parse_mode="Markdown"
                 )
                 return EDIT_PROFILE
         except ValueError:
             await update.message.reply_text(
-                "⚠️ Пожалуйста, введите корректный возраст в виде числа."
+                "⚠️ Пожалуйста, введите корректный возраст в виде числа.\n\n"
+                "Попробуйте еще раз или нажмите /cancel для отмены.",
+                parse_mode="Markdown"
+            )
+            return EDIT_PROFILE
+        except Exception as e:
+            logger.error(f"Error handling age input: {e}", exc_info=True)
+            await update.message.reply_text(
+                "❌ Произошла ошибка при обработке вашего запроса.\n"
+                "Пожалуйста, попробуйте еще раз или нажмите /cancel для отмены.",
+                parse_mode="Markdown"
             )
             return EDIT_PROFILE
     
