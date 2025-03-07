@@ -135,44 +135,68 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
         user_id = str(update.effective_user.id)
         
         # Check if user is subscribed to the channel
-        channel_id = "-1001945632215"  # Use channel ID instead of username for more reliable checks
-        channel_url = "https://t.me/+DZnkhC9iv69jYjAy"
+        channel_name = "твое чудо"  # Display name for the channel
+        channel_url = "https://t.me/+DZnkhC9iv69jYjAy"  # Join link
+        channel_token = "+DZnkhC9iv69jYjAy"  # Token part of the link for verification
         subscription_required = True  # Set this to False to disable subscription requirement
         
+        # Set to False to skip subscription check temporarily (for debugging)
+        perform_actual_check = False
+        
         if subscription_required:
-            try:
-                # Check membership
-                member = await context.bot.get_chat_member(chat_id=channel_id, user_id=user_id)
-                if member.status not in ['member', 'administrator', 'creator']:
-                    # User is not subscribed
+            if perform_actual_check:
+                try:
+                    # Try using the export chat invite link method
+                    # This requires the bot to be an admin in the channel with invite link privileges
+                    channel_id = "-1001945632215"  # This is only used if the bot is an admin
+                    invite_link = await context.bot.export_chat_invite_link(chat_id=channel_id)
+                    
+                    # Check membership
+                    member = await context.bot.get_chat_member(chat_id=channel_id, user_id=user_id)
+                    
+                    if member.status not in ['member', 'administrator', 'creator']:
+                        # User is not subscribed
+                        await update.message.reply_text(
+                            f"❌ *Вы не подписаны на канал {channel_name}*\n"
+                            "Пожалуйста, подпишитесь на канал, чтобы получить полный доступ к боту.",
+                            reply_markup=InlineKeyboardMarkup([
+                                [InlineKeyboardButton("Подписаться на канал", url=channel_url)],
+                                [InlineKeyboardButton("Я подписался ✅", callback_data="check_subscription")]
+                            ]),
+                            parse_mode="Markdown"
+                        )
+                        # Store in context that this user needs subscription verification
+                        context.user_data["needs_subscription"] = True
+                        return START
+                except Exception as e:
+                    logger.error(f"Error checking subscription: {e}")
+                    # Always show subscription requirement even if check fails
                     await update.message.reply_text(
-                        "❌ *Вы не подписаны на канал 🌸 твое чудо.*\n"
-                        "Пожалуйста, подпишитесь на канал, чтобы получить полный доступ к боту.",
+                        f"❌ *Для использования бота требуется подписка на канал {channel_name}*\n"
+                        "Пожалуйста, подпишитесь на канал по ссылке ниже:",
                         reply_markup=InlineKeyboardMarkup([
-                            [InlineKeyboardButton("Подписаться на канал", url=channel_url)]
+                            [InlineKeyboardButton("Подписаться на канал", url=channel_url)],
+                            [InlineKeyboardButton("Я подписался ✅", callback_data="check_subscription")]
                         ]),
                         parse_mode="Markdown"
                     )
+                    # Store in context that this user needs subscription verification
+                    context.user_data["needs_subscription"] = True
                     return START
-            except telegram.error.BadRequest as e:
-                logger.error(f"Bad request error in subscription check: {e}")
-                # Show error message for invalid channel
+            else:
+                # Always show subscription requirement (no actual check)
                 await update.message.reply_text(
-                    "⚠️ Ошибка проверки подписки: неверный канал. Пожалуйста, сообщите администратору."
+                    f"❌ *Для использования бота требуется подписка на канал {channel_name}*\n"
+                    "Пожалуйста, подпишитесь на канал по ссылке ниже:",
+                    reply_markup=InlineKeyboardMarkup([
+                        [InlineKeyboardButton("Подписаться на канал", url=channel_url)],
+                        [InlineKeyboardButton("Я подписался ✅", callback_data="check_subscription")]
+                    ]),
+                    parse_mode="Markdown"
                 )
-            except telegram.error.Unauthorized as e:
-                logger.error(f"Bot is not authorized to check subscription: {e}")
-                # Show error message for unauthorized bot
-                await update.message.reply_text(
-                    "⚠️ Бот не имеет прав для проверки подписки. Пожалуйста, сообщите администратору."
-                )
-            except Exception as e:
-                logger.error(f"Error checking subscription status: {e}", exc_info=True)
-                # Show generic error message
-                await update.message.reply_text(
-                    "⚠️ Произошла ошибка при проверке подписки. Пожалуйста, попробуйте еще раз позже."
-                )
-                # Don't return here - let the user proceed with the bot
+                # Store in context that this user needs subscription verification
+                context.user_data["needs_subscription"] = True
+                return START
         
         # Initialize user if not exists
         if user_id not in user_data:
@@ -275,7 +299,72 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     
     user_id = str(query.from_user.id)
     
-    if query.data == "profile":
+    # Handle subscription check
+    if query.data == "check_subscription":
+        # User clicked "I subscribed" button
+        channel_name = "твое чудо"
+        channel_url = "https://t.me/+DZnkhC9iv69jYjAy"
+        channel_id = "-1001945632215"  # Use your actual channel ID
+        
+        # Try to verify subscription
+        try:
+            # Check membership
+            member = await context.bot.get_chat_member(chat_id=channel_id, user_id=user_id)
+            
+            if member.status in ['member', 'administrator', 'creator']:
+                # User is subscribed - show welcome message
+                # Remove the "needs_subscription" flag
+                if "needs_subscription" in context.user_data:
+                    del context.user_data["needs_subscription"]
+                
+                # Send success message and show main menu
+                await query.edit_message_text(
+                    f"✅ *Подписка подтверждена!*\n\nДобро пожаловать в DOX Анонимный Чат! 🎭",
+                    reply_markup=InlineKeyboardMarkup([
+                        [
+                            InlineKeyboardButton("👤 Профиль", callback_data="profile"),
+                            InlineKeyboardButton("🔍 Найти собеседника", callback_data="find_chat")
+                        ],
+                        [InlineKeyboardButton("👥 Групповой чат", callback_data="group_find")],
+                        [InlineKeyboardButton("ℹ️ Помощь", callback_data="help")]
+                    ]),
+                    parse_mode="Markdown"
+                )
+                return START
+            else:
+                # User is still not subscribed
+                await query.edit_message_text(
+                    f"❌ *Вы все еще не подписаны на канал {channel_name}*\n"
+                    "Пожалуйста, подпишитесь на канал для доступа к боту.",
+                    reply_markup=InlineKeyboardMarkup([
+                        [InlineKeyboardButton("Подписаться на канал", url=channel_url)],
+                        [InlineKeyboardButton("Проверить снова ♻️", callback_data="check_subscription")]
+                    ]),
+                    parse_mode="Markdown"
+                )
+                return START
+        except Exception as e:
+            logger.error(f"Error verifying subscription: {e}")
+            # Allow access even if verification fails (fallback)
+            if "needs_subscription" in context.user_data:
+                del context.user_data["needs_subscription"]
+            
+            await query.edit_message_text(
+                "✅ *Доступ предоставлен!*\n\nДобро пожаловать в DOX Анонимный Чат! 🎭",
+                reply_markup=InlineKeyboardMarkup([
+                    [
+                        InlineKeyboardButton("👤 Профиль", callback_data="profile"),
+                        InlineKeyboardButton("🔍 Найти собеседника", callback_data="find_chat")
+                    ],
+                    [InlineKeyboardButton("👥 Групповой чат", callback_data="group_find")],
+                    [InlineKeyboardButton("ℹ️ Помощь", callback_data="help")]
+                ]),
+                parse_mode="Markdown"
+            )
+            return START
+    
+    # Handle other callbacks
+    elif query.data == "profile":
         return await show_profile(update, context)
     
     elif query.data == "find_chat":
