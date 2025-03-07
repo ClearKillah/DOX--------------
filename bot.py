@@ -1118,13 +1118,13 @@ async def handle_avatar_upload(update: Update, context: ContextTypes.DEFAULT_TYP
         try:
             # Get the largest photo (best quality)
             photo = update.message.photo[-1]
-            photo_file_id = photo.file_id
+            photo_file = await photo.get_file()
             
             # Create avatars directory if it doesn't exist
             os.makedirs("avatars", exist_ok=True)
             
             # Save avatar
-            avatar_path = await save_avatar(user_id, photo_file_id)
+            avatar_path = await save_avatar(user_id, photo_file)
             
             if avatar_path:
                 # Show success message and return to profile
@@ -1510,18 +1510,31 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     if context.user_data.get("uploading_avatar"):
         if update.message.photo:
             return await handle_avatar_upload(update, context)
-        elif update.message.text == "/cancel":
+        elif update.message.text and update.message.text.startswith("/cancel"):
             del context.user_data["uploading_avatar"]
+            
+            keyboard = [
+                [
+                    InlineKeyboardButton("✏️ Изменить профиль", callback_data="edit_profile"),
+                    InlineKeyboardButton("📸 Аватар", callback_data="upload_avatar")
+                ],
+                [
+                    InlineKeyboardButton("🔄 Интересы", callback_data="interest_edit"),
+                    InlineKeyboardButton("📈 Статистика", callback_data="show_stats")
+                ],
+                [InlineKeyboardButton("⬅️ Вернуться в меню", callback_data="back_to_start")]
+            ]
+            
             await update.message.reply_text(
-                "❌ Загрузка аватара отменена.",
-                reply_markup=InlineKeyboardMarkup([[
-                    InlineKeyboardButton("👤 Вернуться к профилю", callback_data="profile")
-                ]])
+                "❌ *Загрузка аватара отменена.*",
+                reply_markup=InlineKeyboardMarkup(keyboard),
+                parse_mode="Markdown"
             )
             return PROFILE
         else:
             await update.message.reply_text(
-                "📸 Пожалуйста, отправьте фотографию или нажмите /cancel для отмены."
+                "📸 *Пожалуйста, отправьте фотографию или нажмите /cancel для отмены.*",
+                parse_mode="Markdown"
             )
             return PROFILE
     
@@ -2804,8 +2817,11 @@ def main() -> None:
     try:
         logger.info("Starting bot...")
         # Create the Application
-        token = "8039344227:AAEDCP_902a3r52JIdM9REqUyPx-p2IVtxA"
-        logger.info("Using token: %s", token)
+        token = os.getenv("TELEGRAM_TOKEN")
+        if not token:
+            logger.error("TELEGRAM_TOKEN environment variable not set. Please set it and try again.")
+            sys.exit(1)
+        logger.info("Using token from environment variable.")
         
         # Build application
         application = (
