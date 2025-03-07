@@ -286,6 +286,107 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         )
         return GROUP_CHATTING
     
+    elif query.data.startswith("group_join_"):
+        # Handle direct group join by ID
+        group_id = query.data.split("group_join_")[1]
+        
+        user_id = str(query.from_user.id)
+        
+        if group_id not in group_chats:
+            await query.edit_message_text(
+                text="❌ *Группа не найдена*\n\n"
+                     "Возможно, эта группа больше не существует.",
+                parse_mode="Markdown"
+            )
+            return START
+        
+        # Check if group is full
+        if len(group_chats[group_id]["members"]) >= GROUP_MAX_MEMBERS:
+            keyboard = [
+                [InlineKeyboardButton("🔍 Присоединиться к другой группе", callback_data="group_join")],
+                [InlineKeyboardButton("🆕 Создать новую группу", callback_data="group_create")],
+                [InlineKeyboardButton("🔙 Назад", callback_data="back_to_start")]
+            ]
+            
+            await query.edit_message_text(
+                text="⚠️ *Группа заполнена*\n\n"
+                     "В этой группе уже максимальное количество участников.",
+                reply_markup=InlineKeyboardMarkup(keyboard),
+                parse_mode="Markdown"
+            )
+            return GROUP_CHATTING
+        
+        # Check if user is already in this group
+        if user_id in group_chats[group_id]["members"]:
+            keyboard = [
+                [InlineKeyboardButton("🚪 Покинуть группу", callback_data=f"group_leave_{group_id}")],
+                [InlineKeyboardButton("🔙 Назад", callback_data="back_to_start")]
+            ]
+            
+            await query.edit_message_text(
+                text="⚠️ *Вы уже состоите в этой группе*",
+                reply_markup=InlineKeyboardMarkup(keyboard),
+                parse_mode="Markdown"
+            )
+            return GROUP_CHATTING
+        
+        # Add user to group
+        group_chats[group_id]["members"].append(user_id)
+        
+        # Fetch member names
+        group_info = group_chats[group_id]
+        member_list = ""
+        for member_id in group_info["members"]:
+            try:
+                member_info = await context.bot.get_chat(int(member_id))
+                member_list += f"• {member_info.first_name}\n"
+            except Exception as e:
+                logger.error(f"Error fetching member info: {e}")
+                member_list += f"• Пользователь {member_id}\n"
+        
+        # Notify user
+        keyboard = [
+            [InlineKeyboardButton("🚪 Покинуть группу", callback_data=f"group_leave_{group_id}")],
+            [InlineKeyboardButton("🔙 Назад", callback_data="back_to_start")]
+        ]
+        
+        await query.edit_message_text(
+            text=f"✅ *Вы присоединились к группе!*\n\n"
+                 f"Название: {group_info['name']}\n"
+                 f"Участники: {len(group_info['members'])}/{GROUP_MAX_MEMBERS}\n\n"
+                 f"Текущие участники:\n{member_list}\n"
+                 f"Все сообщения в этом чате анонимны.",
+            reply_markup=InlineKeyboardMarkup(keyboard),
+            parse_mode="Markdown"
+        )
+        
+        # Notify other members that someone joined
+        for member_id in group_info["members"]:
+            if member_id != user_id:  # Don't notify the user who just joined
+                try:
+                    await context.bot.send_message(
+                        chat_id=int(member_id),
+                        text=f"👋 *Новый участник присоединился к группе!*\n\n"
+                             f"В группе теперь {len(group_info['members'])} участников.",
+                        parse_mode="Markdown"
+                    )
+                except Exception as e:
+                    logger.error(f"Error notifying group member {member_id}: {e}")
+        
+        return GROUP_CHATTING
+    
+    elif query.data == "group_enter_code":
+        # Allow user to enter an invite code manually
+        await query.edit_message_text(
+            text="🔑 *Введите код приглашения*\n\n"
+                 "Отправьте код приглашения, который вам дал создатель группы.",
+            parse_mode="Markdown"
+        )
+        
+        # Set flag so handle_group_message will process the invite code
+        context.user_data["joining_group"] = True
+        return GROUP_CHATTING
+    
     elif query.data == "cancel_search":
         # Remove user from searching list
         if user_id in searching_users:
@@ -402,13 +503,40 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
             [
                 InlineKeyboardButton("👤 Профиль", callback_data="profile"),
                 InlineKeyboardButton("🔍 Найти собеседника", callback_data="find_chat")
-            ]
+            ],
+            [InlineKeyboardButton("👥 Групповой чат", callback_data="group_find")],
+            [InlineKeyboardButton("ℹ️ Помощь", callback_data="help")]
         ]
         
+        # Get user stats
+        user_id = str(query.from_user.id)
+        chat_count = user_data[user_id].get("chat_count", 0)
+        rating = user_data[user_id].get("rating", 0)
+        rating_stars = "⭐" * int(rating) + "☆" * (5 - int(rating))
+        
+        # Create a more visually appealing welcome message
+        welcome_text = (
+            f"*Добро пожаловать в DOX Анонимный Чат!* 🎭\n\n"
+            f"👋 Привет, {query.from_user.first_name}!\n\n"
+            f"🔒 *Анонимность гарантирована*\n"
+            f"💬 *Мгновенный поиск собеседников*\n"
+            f"🌐 *Общение без границ*\n\n"
+        )
+        
+        # Add user stats if they have any chats
+        if chat_count > 0:
+            welcome_text += (
+                f"📊 *Ваша статистика:*\n"
+                f"• Количество чатов: {chat_count}\n"
+            )
+            if rating > 0:
+                welcome_text += f"• Рейтинг: {rating_stars} ({rating:.1f}/5)\n"
+            welcome_text += "\n"
+        
+        welcome_text += "🔽 *Выберите действие:* 🔽"
+        
         await query.edit_message_text(
-            text="*Добро пожаловать в Dox: Анонимный Чат* 🎭\n\n"
-                 "Здесь вы можете анонимно общаться с другими пользователями.\n\n"
-                 "*Выберите действие:*",
+            text=welcome_text,
             reply_markup=InlineKeyboardMarkup(keyboard),
             parse_mode="Markdown"
         )
@@ -1957,6 +2085,9 @@ async def join_group_chat(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     
     if not group_list_text:
         group_list_text = "Нет активных групповых чатов. Создайте новый!"
+    
+    # Add option to enter invite code manually
+    keyboard.append([InlineKeyboardButton("✉️ Ввести код приглашения", callback_data="group_enter_code")])
     
     # Add a back button
     keyboard.append([InlineKeyboardButton("🔙 Назад", callback_data="back_to_start")])
