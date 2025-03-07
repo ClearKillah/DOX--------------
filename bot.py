@@ -736,15 +736,13 @@ async def show_profile(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
         f"• Пол: {gender}\n"
         f"• Возраст: {age}\n"
         f"*Интересы:*\n{interests_text}\n\n"
-        f"*📊 Статистика:*
-"
+        f"*📊 Статистика:*\n"
         f"• Всего чатов: {chat_count}\n"
         f"• Сообщений отправлено: {total_messages}\n"
         f"• Средняя длительность чата: {avg_duration_min} мин.\n"
         f"• Рейтинг: {rating_stars} {rating_trend} ({rating:.1f}/5)\n"
         f"  На основе {rating_count} оценок\n\n"
-        f"*🏆 Достижения:*
-{achievements_text}"
+        f"*🏆 Достижения:*\n{achievements_text}"
     )
     
     # Create keyboard
