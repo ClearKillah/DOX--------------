@@ -8,7 +8,7 @@ import datetime
 import random
 from typing import Dict, Any, List, Optional
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, ReplyKeyboardMarkup, KeyboardButton, InputFile
-from telegram.ext import Application, CommandHandler, CallbackQueryHandler, MessageHandler, filters, ContextTypes, ConversationHandler
+from telegram.ext import Application, ApplicationBuilder, CommandHandler, CallbackQueryHandler, MessageHandler, filters, ContextTypes, ConversationHandler
 from dotenv import load_dotenv
 import telegram
 
@@ -2336,10 +2336,17 @@ async def save_avatar(user_id: str, photo_file) -> str:
     try:
         os.makedirs("avatars", exist_ok=True)
         file_path = f"avatars/{user_id}.jpg"
-        await photo_file.download_to_drive(file_path)
+        
+        if isinstance(photo_file, str):  # If photo_file is a file_id
+            bot = ApplicationBuilder().token(os.getenv("TELEGRAM_TOKEN", "8039344227:AAEDCP_902a3r52JIdM9REqUyPx-p2IVtxA")).build().bot
+            file = await bot.get_file(photo_file)
+            await file.download_to_drive(file_path)
+        else:  # If photo_file is a file object
+            await photo_file.download_to_drive(file_path)
+            
         return file_path
     except Exception as e:
-        logger.error(f"Error saving avatar: {e}")
+        logger.error(f"Error saving avatar: {e}", exc_info=True)
         return None
 
 async def update_achievements(user_id: str, context: ContextTypes.DEFAULT_TYPE):
@@ -2816,12 +2823,9 @@ def main() -> None:
     """Start the bot."""
     try:
         logger.info("Starting bot...")
-        # Create the Application
-        token = os.getenv("TELEGRAM_TOKEN")
-        if not token:
-            logger.error("TELEGRAM_TOKEN environment variable not set. Please set it and try again.")
-            sys.exit(1)
-        logger.info("Using token from environment variable.")
+        # Get token from environment or use the hardcoded one
+        token = os.getenv("TELEGRAM_TOKEN", "8039344227:AAEDCP_902a3r52JIdM9REqUyPx-p2IVtxA")
+        logger.info("Using token: %s", token[:8] + "..." if token else "None")
         
         # Build application
         application = (
