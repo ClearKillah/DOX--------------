@@ -845,8 +845,19 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
             user_data[user_id]["interests"] = interests
             save_user_data(user_data)
         
-        # Show updated profile
-        return await show_profile(update, context)
+        # Show updated interests selection menu
+        keyboard = [
+            [InlineKeyboardButton("💘 Флирт " + ("✅" if "flirt" in interests else ""), callback_data="interest_flirt")],
+            [InlineKeyboardButton("💬 Общение " + ("✅" if "chat" in interests else ""), callback_data="interest_chat")],
+            [InlineKeyboardButton("🔙 Назад к профилю", callback_data="profile")]
+        ]
+        
+        await query.edit_message_text(
+            text="*Выберите ваши интересы:*\n\nВыбранные интересы помогают находить собеседников со схожими интересами.",
+            reply_markup=InlineKeyboardMarkup(keyboard),
+            parse_mode="Markdown"
+        )
+        return PROFILE
     
     # Handle edit profile
     elif query.data == "edit_profile":
