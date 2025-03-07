@@ -129,10 +129,32 @@ async def send_typing_notification(context: ContextTypes.DEFAULT_TYPE) -> None:
         context.job_queue.remove_job(job.name)
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Send welcome message when the command /start is issued."""
+    """Send welcome message when the command /start is issued, with a subscription check."""
     try:
         logger.debug("Start command received from user %s", update.effective_user.id)
         user_id = str(update.effective_user.id)
+        
+        # Check if user is subscribed to the channel
+        channel_username = "@tvoyznaklove_bot"
+        try:
+            member = await context.bot.get_chat_member(chat_id=channel_username, user_id=user_id)
+            if member.status not in ['member', 'administrator', 'creator']:
+                # User is not subscribed
+                await update.message.reply_text(
+                    "❌ *Вы не подписаны на канал 🌸 твое чудо.*\n"
+                    "Пожалуйста, подпишитесь на канал, чтобы получить полный доступ к боту.",
+                    reply_markup=InlineKeyboardMarkup([
+                        [InlineKeyboardButton("Подписаться на канал", url="https://t.me/+DZnkhC9iv69jYjAy")]
+                    ]),
+                    parse_mode="Markdown"
+                )
+                return START
+        except Exception as e:
+            logger.error(f"Error checking subscription status: {e}")
+            await update.message.reply_text(
+                "⚠️ Произошла ошибка при проверке подписки. Пожалуйста, попробуйте еще раз позже."
+            )
+            return START
         
         # Initialize user if not exists
         if user_id not in user_data:
@@ -714,13 +736,15 @@ async def show_profile(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
         f"• Пол: {gender}\n"
         f"• Возраст: {age}\n"
         f"*Интересы:*\n{interests_text}\n\n"
-        f"*📊 Статистика:*\n"
+        f"*📊 Статистика:*
+"
         f"• Всего чатов: {chat_count}\n"
         f"• Сообщений отправлено: {total_messages}\n"
         f"• Средняя длительность чата: {avg_duration_min} мин.\n"
         f"• Рейтинг: {rating_stars} {rating_trend} ({rating:.1f}/5)\n"
         f"  На основе {rating_count} оценок\n\n"
-        f"*🏆 Достижения:*\n{achievements_text}"
+        f"*🏆 Достижения:*
+{achievements_text}"
     )
     
     # Create keyboard
