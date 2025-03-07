@@ -136,7 +136,14 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
         
         # Check if user is subscribed to the channel
         channel_username = "@tvoyznaklove"
+        channel_url = "https://t.me/+DZnkhC9iv69jYjAy"
+        
         try:
+            # Try to get chat info first to validate the channel
+            chat_info = await context.bot.get_chat(chat_id=channel_username)
+            logger.debug(f"Chat info retrieved: {chat_info.title}")
+            
+            # Then check membership
             member = await context.bot.get_chat_member(chat_id=channel_username, user_id=user_id)
             if member.status not in ['member', 'administrator', 'creator']:
                 # User is not subscribed
@@ -144,17 +151,23 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
                     "❌ *Вы не подписаны на канал 🌸 твое чудо.*\n"
                     "Пожалуйста, подпишитесь на канал, чтобы получить полный доступ к боту.",
                     reply_markup=InlineKeyboardMarkup([
-                        [InlineKeyboardButton("Подписаться на канал", url="https://t.me/+DZnkhC9iv69jYjAy")]
+                        [InlineKeyboardButton("Подписаться на канал", url=channel_url)]
                     ]),
                     parse_mode="Markdown"
                 )
                 return START
+        except telegram.error.BadRequest as e:
+            logger.error(f"Bad request error in subscription check: {e}")
+            # Skip subscription check if channel not found or other bad request
+            logger.info("Proceeding without subscription check due to BadRequest error")
+        except telegram.error.Unauthorized as e:
+            logger.error(f"Bot is not authorized to check subscription: {e}")
+            # Skip subscription check if unauthorized
+            logger.info("Proceeding without subscription check due to Unauthorized error")
         except Exception as e:
-            logger.error(f"Error checking subscription status: {e}")
-            await update.message.reply_text(
-                "⚠️ Произошла ошибка при проверке подписки. Пожалуйста, попробуйте еще раз позже."
-            )
-            return START
+            logger.error(f"Error checking subscription status: {e}", exc_info=True)
+            # Continue without error message to user
+            logger.info("Proceeding without subscription check due to other error")
         
         # Initialize user if not exists
         if user_id not in user_data:
