@@ -140,16 +140,19 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
         channel_token = "+DZnkhC9iv69jYjAy"  # Token part of the link for verification
         subscription_required = True  # Set this to False to disable subscription requirement
         
-        # Set to False to skip subscription check temporarily (for debugging)
-        perform_actual_check = False
+        # Set to True to perform actual subscription check
+        perform_actual_check = True
         
-        if subscription_required:
+        # Check if user already verified subscription previously
+        if user_id in user_data and user_data[user_id].get("subscription_verified", False):
+            logger.info(f"User {user_id} already verified subscription, skipping check")
+            # User already verified - skip subscription check
+            pass
+        elif subscription_required:
             if perform_actual_check:
                 try:
-                    # Try using the export chat invite link method
-                    # This requires the bot to be an admin in the channel with invite link privileges
+                    # Use the channel ID for verification
                     channel_id = "-1001945632215"  # This is only used if the bot is an admin
-                    invite_link = await context.bot.export_chat_invite_link(chat_id=channel_id)
                     
                     # Check membership
                     member = await context.bot.get_chat_member(chat_id=channel_id, user_id=user_id)
@@ -168,6 +171,11 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
                         # Store in context that this user needs subscription verification
                         context.user_data["needs_subscription"] = True
                         return START
+                    else:
+                        # User is already subscribed - mark as verified
+                        if user_id in user_data:
+                            user_data[user_id]["subscription_verified"] = True
+                            save_user_data(user_data)
                 except Exception as e:
                     logger.error(f"Error checking subscription: {e}")
                     # Always show subscription requirement even if check fails
@@ -317,9 +325,40 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
                 if "needs_subscription" in context.user_data:
                     del context.user_data["needs_subscription"]
                 
+                # Mark as verified in user_data
+                if user_id in user_data:
+                    user_data[user_id]["subscription_verified"] = True
+                    save_user_data(user_data)
+                
+                # Create a detailed welcome message
+                chat_count = user_data.get(user_id, {}).get("chat_count", 0)
+                rating = user_data.get(user_id, {}).get("rating", 0)
+                rating_stars = "⭐" * int(rating) + "☆" * (5 - int(rating))
+                
+                welcome_text = (
+                    f"✅ *Подписка подтверждена!*\n\n"
+                    f"*Добро пожаловать в DOX Анонимный Чат!* 🎭\n\n"
+                    f"👋 Привет, {query.from_user.first_name}!\n\n"
+                    f"🔒 *Анонимность гарантирована*\n"
+                    f"💬 *Мгновенный поиск собеседников*\n"
+                    f"🌐 *Общение без границ*\n\n"
+                )
+                
+                # Add user stats if they have any chats
+                if chat_count > 0:
+                    welcome_text += (
+                        f"📊 *Ваша статистика:*\n"
+                        f"• Количество чатов: {chat_count}\n"
+                    )
+                    if rating > 0:
+                        welcome_text += f"• Рейтинг: {rating_stars} ({rating:.1f}/5)\n"
+                    welcome_text += "\n"
+                
+                welcome_text += "🔽 *Выберите действие:* 🔽"
+                
                 # Send success message and show main menu
                 await query.edit_message_text(
-                    f"✅ *Подписка подтверждена!*\n\nДобро пожаловать в DOX Анонимный Чат! 🎭",
+                    welcome_text,
                     reply_markup=InlineKeyboardMarkup([
                         [
                             InlineKeyboardButton("👤 Профиль", callback_data="profile"),
@@ -345,12 +384,43 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
                 return START
         except Exception as e:
             logger.error(f"Error verifying subscription: {e}")
-            # Allow access even if verification fails (fallback)
+            # Mark as verified even if verification fails (fallback)
             if "needs_subscription" in context.user_data:
                 del context.user_data["needs_subscription"]
             
+            # Mark as verified in user_data
+            if user_id in user_data:
+                user_data[user_id]["subscription_verified"] = True
+                save_user_data(user_data)
+            
+            # Create a full welcome message
+            chat_count = user_data.get(user_id, {}).get("chat_count", 0)
+            rating = user_data.get(user_id, {}).get("rating", 0)
+            rating_stars = "⭐" * int(rating) + "☆" * (5 - int(rating))
+            
+            welcome_text = (
+                f"✅ *Доступ предоставлен!*\n\n"
+                f"*Добро пожаловать в DOX Анонимный Чат!* 🎭\n\n"
+                f"👋 Привет, {query.from_user.first_name}!\n\n"
+                f"🔒 *Анонимность гарантирована*\n"
+                f"💬 *Мгновенный поиск собеседников*\n"
+                f"🌐 *Общение без границ*\n\n"
+            )
+            
+            # Add user stats if they have any chats
+            if chat_count > 0:
+                welcome_text += (
+                    f"📊 *Ваша статистика:*\n"
+                    f"• Количество чатов: {chat_count}\n"
+                )
+                if rating > 0:
+                    welcome_text += f"• Рейтинг: {rating_stars} ({rating:.1f}/5)\n"
+                welcome_text += "\n"
+            
+            welcome_text += "🔽 *Выберите действие:* 🔽"
+            
             await query.edit_message_text(
-                "✅ *Доступ предоставлен!*\n\nДобро пожаловать в DOX Анонимный Чат! 🎭",
+                welcome_text,
                 reply_markup=InlineKeyboardMarkup([
                     [
                         InlineKeyboardButton("👤 Профиль", callback_data="profile"),
@@ -363,15 +433,56 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
             )
             return START
     
-    # Handle other callbacks
     elif query.data == "profile":
         return await show_profile(update, context)
     
     elif query.data == "find_chat":
         return await find_chat(update, context)
     
+    elif query.data == "help":
+        # Show help information
+        help_text = (
+            "*Помощь по использованию бота:*\n\n"
+            "🔍 *Найти собеседника* - начать поиск анонимного собеседника\n"
+            "👥 *Групповой чат* - найти групповой анонимный чат\n"
+            "👤 *Профиль* - настроить свой профиль\n\n"
+            "Во время чата вы можете использовать команды:\n"
+            "/end - завершить текущий чат\n"
+            "/profile - показать профиль\n"
+            "/report - пожаловаться на собеседника\n\n"
+            "Приятного общения! 😊"
+        )
+        
+        await query.edit_message_text(
+            help_text,
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton("◀️ Назад", callback_data="back_to_menu")]
+            ]),
+            parse_mode="Markdown"
+        )
+        return START
+    
+    elif query.data == "back_to_menu":
+        # Go back to main menu
+        keyboard = [
+            [
+                InlineKeyboardButton("👤 Профиль", callback_data="profile"),
+                InlineKeyboardButton("🔍 Найти собеседника", callback_data="find_chat")
+            ],
+            [InlineKeyboardButton("👥 Групповой чат", callback_data="group_find")],
+            [InlineKeyboardButton("ℹ️ Помощь", callback_data="help")]
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        
+        await query.edit_message_text(
+            "*Добро пожаловать в DOX Анонимный Чат!* 🎭\n\n"
+            "Выберите действие:",
+            reply_markup=reply_markup,
+            parse_mode="Markdown"
+        )
+        return START
+    
     elif query.data == "group_find":
-        # Handle group chat initiation
         return await find_group_chat(update, context)
     
     elif query.data == "group_create":
