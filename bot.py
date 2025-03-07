@@ -135,39 +135,44 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
         user_id = str(update.effective_user.id)
         
         # Check if user is subscribed to the channel
-        channel_username = "@tvoyznaklove"
+        channel_id = "-1001945632215"  # Use channel ID instead of username for more reliable checks
         channel_url = "https://t.me/+DZnkhC9iv69jYjAy"
+        subscription_required = True  # Set this to False to disable subscription requirement
         
-        try:
-            # Try to get chat info first to validate the channel
-            chat_info = await context.bot.get_chat(chat_id=channel_username)
-            logger.debug(f"Chat info retrieved: {chat_info.title}")
-            
-            # Then check membership
-            member = await context.bot.get_chat_member(chat_id=channel_username, user_id=user_id)
-            if member.status not in ['member', 'administrator', 'creator']:
-                # User is not subscribed
+        if subscription_required:
+            try:
+                # Check membership
+                member = await context.bot.get_chat_member(chat_id=channel_id, user_id=user_id)
+                if member.status not in ['member', 'administrator', 'creator']:
+                    # User is not subscribed
+                    await update.message.reply_text(
+                        "❌ *Вы не подписаны на канал 🌸 твое чудо.*\n"
+                        "Пожалуйста, подпишитесь на канал, чтобы получить полный доступ к боту.",
+                        reply_markup=InlineKeyboardMarkup([
+                            [InlineKeyboardButton("Подписаться на канал", url=channel_url)]
+                        ]),
+                        parse_mode="Markdown"
+                    )
+                    return START
+            except telegram.error.BadRequest as e:
+                logger.error(f"Bad request error in subscription check: {e}")
+                # Show error message for invalid channel
                 await update.message.reply_text(
-                    "❌ *Вы не подписаны на канал 🌸 твое чудо.*\n"
-                    "Пожалуйста, подпишитесь на канал, чтобы получить полный доступ к боту.",
-                    reply_markup=InlineKeyboardMarkup([
-                        [InlineKeyboardButton("Подписаться на канал", url=channel_url)]
-                    ]),
-                    parse_mode="Markdown"
+                    "⚠️ Ошибка проверки подписки: неверный канал. Пожалуйста, сообщите администратору."
                 )
-                return START
-        except telegram.error.BadRequest as e:
-            logger.error(f"Bad request error in subscription check: {e}")
-            # Skip subscription check if channel not found or other bad request
-            logger.info("Proceeding without subscription check due to BadRequest error")
-        except telegram.error.Unauthorized as e:
-            logger.error(f"Bot is not authorized to check subscription: {e}")
-            # Skip subscription check if unauthorized
-            logger.info("Proceeding without subscription check due to Unauthorized error")
-        except Exception as e:
-            logger.error(f"Error checking subscription status: {e}", exc_info=True)
-            # Continue without error message to user
-            logger.info("Proceeding without subscription check due to other error")
+            except telegram.error.Unauthorized as e:
+                logger.error(f"Bot is not authorized to check subscription: {e}")
+                # Show error message for unauthorized bot
+                await update.message.reply_text(
+                    "⚠️ Бот не имеет прав для проверки подписки. Пожалуйста, сообщите администратору."
+                )
+            except Exception as e:
+                logger.error(f"Error checking subscription status: {e}", exc_info=True)
+                # Show generic error message
+                await update.message.reply_text(
+                    "⚠️ Произошла ошибка при проверке подписки. Пожалуйста, попробуйте еще раз позже."
+                )
+                # Don't return here - let the user proceed with the bot
         
         # Initialize user if not exists
         if user_id not in user_data:
