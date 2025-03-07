@@ -219,21 +219,6 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
             save_user_data(user_data)
             logger.debug("New user initialized: %s", user_id)
         
-        keyboard = [
-            [
-                InlineKeyboardButton("👤 Профиль", callback_data="profile"),
-                InlineKeyboardButton("🔍 Найти собеседника", callback_data="find_chat")
-            ],
-            [InlineKeyboardButton("👥 Групповой чат", callback_data="group_find")],
-            [InlineKeyboardButton("ℹ️ Помощь", callback_data="help")]
-        ]
-        reply_markup = InlineKeyboardMarkup(keyboard)
-        
-        # Get user stats
-        chat_count = user_data[user_id].get("chat_count", 0)
-        rating = user_data[user_id].get("rating", 0)
-        rating_stars = "⭐" * int(rating) + "☆" * (5 - int(rating))
-        
         # Create a more visually appealing welcome message
         welcome_text = (
             f"*Добро пожаловать в DOX Анонимный Чат!* 🎭\n\n"
@@ -253,7 +238,23 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
                 welcome_text += f"• Рейтинг: {rating_stars} ({rating:.1f}/5)\n"
             welcome_text += "\n"
         
-        welcome_text += "🔽 *Выберите действие:* 🔽"
+        welcome_text += "👇 *Выберите действие:* 👇"
+        
+        # Create a better organized menu with clear categories
+        keyboard = [
+            [
+                InlineKeyboardButton("👤 Мой профиль", callback_data="profile")
+            ],
+            [
+                InlineKeyboardButton("🔍 Найти собеседника", callback_data="find_chat"),
+                InlineKeyboardButton("👥 Групповой чат", callback_data="group_find")
+            ],
+            [
+                InlineKeyboardButton("ℹ️ Помощь", callback_data="help"),
+                InlineKeyboardButton("🌟 О боте", callback_data="about")
+            ]
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
         
         logger.debug("Sending welcome message with logo to user %s", user_id)
         
@@ -354,18 +355,23 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
                         welcome_text += f"• Рейтинг: {rating_stars} ({rating:.1f}/5)\n"
                     welcome_text += "\n"
                 
-                welcome_text += "🔽 *Выберите действие:* 🔽"
+                welcome_text += "👇 *Выберите действие:* 👇"
                 
                 # Send success message and show main menu
                 await query.edit_message_text(
                     welcome_text,
                     reply_markup=InlineKeyboardMarkup([
                         [
-                            InlineKeyboardButton("👤 Профиль", callback_data="profile"),
-                            InlineKeyboardButton("🔍 Найти собеседника", callback_data="find_chat")
+                            InlineKeyboardButton("👤 Мой профиль", callback_data="profile")
                         ],
-                        [InlineKeyboardButton("👥 Групповой чат", callback_data="group_find")],
-                        [InlineKeyboardButton("ℹ️ Помощь", callback_data="help")]
+                        [
+                            InlineKeyboardButton("🔍 Найти собеседника", callback_data="find_chat"),
+                            InlineKeyboardButton("👥 Групповой чат", callback_data="group_find")
+                        ],
+                        [
+                            InlineKeyboardButton("ℹ️ Помощь", callback_data="help"),
+                            InlineKeyboardButton("🌟 О боте", callback_data="about")
+                        ]
                     ]),
                     parse_mode="Markdown"
                 )
@@ -442,27 +448,45 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     elif query.data == "help":
         # Show help information
         help_text = (
-            "*Помощь по использованию бота:*\n\n"
-            "🔍 *Найти собеседника* - начать поиск анонимного собеседника\n"
-            "👥 *Групповой чат* - найти групповой анонимный чат\n"
-            "👤 *Профиль* - настроить свой профиль\n\n"
-            "Во время чата вы можете использовать команды:\n"
-            "/end - завершить текущий чат\n"
-            "/profile - показать профиль\n"
-            "/report - пожаловаться на собеседника\n\n"
-            "Приятного общения! 😊"
+            "📌 *Руководство по использованию бота*\n\n"
+            "🔍 *Как начать общение:*\n"
+            "• Нажмите кнопку \"Найти собеседника\"\n"
+            "• Дождитесь подключения партнера\n"
+            "• Начните диалог\n\n"
+            
+            "👥 *Групповой чат:*\n"
+            "• Создайте свою группу или присоединитесь к существующей\n"
+            "• Общайтесь одновременно с несколькими людьми\n"
+            "• Получите код для приглашения друзей\n\n"
+            
+            "✏️ *Полезные команды:*\n"
+            "• /start - перезапустить бота\n"
+            "• /end - завершить текущий чат\n"
+            "• /profile - показать свой профиль\n"
+            "• /report - пожаловаться на собеседника\n\n"
+            
+            "👤 *Профиль:*\n"
+            "• Заполните информацию о себе\n"
+            "• Загрузите аватар (виден только вам)\n"
+            "• Укажите интересы для лучшего поиска\n\n"
+            
+            "🏆 *Достижения:*\n"
+            "• Зарабатывайте достижения за активность\n"
+            "• Улучшайте свой рейтинг для большей популярности\n\n"
+            
+            "Если у вас остались вопросы, свяжитесь с нашей поддержкой: @YourSupportUsername"
         )
         
         await query.edit_message_text(
             help_text,
             reply_markup=InlineKeyboardMarkup([
-                [InlineKeyboardButton("◀️ Назад", callback_data="back_to_menu")]
+                [InlineKeyboardButton("⬅️ Вернуться в меню", callback_data="back_to_menu")]
             ]),
             parse_mode="Markdown"
         )
         return START
     
-    elif query.data == "back_to_menu":
+    elif query.data == "back_to_menu" or query.data == "back_to_start":
         # Go back to main menu
         keyboard = [
             [
@@ -773,7 +797,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
                 welcome_text += f"• Рейтинг: {rating_stars} ({rating:.1f}/5)\n"
             welcome_text += "\n"
         
-        welcome_text += "🔽 *Выберите действие:* 🔽"
+        welcome_text += "👇 *Выберите действие:* 👇"
         
         await query.edit_message_text(
             text=welcome_text,
@@ -890,6 +914,71 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         context.user_data["uploading_avatar"] = True
         return PROFILE
     
+    elif query.data == "about":
+        # Show information about the bot
+        about_text = (
+            "*DOX Анонимный Чат* 🎭\n\n"
+            "Бот для анонимного общения с незнакомцами.\n\n"
+            "✨ *Особенности:*\n"
+            "• Полная анонимность собеседников\n"
+            "• Поиск по интересам\n"
+            "• Групповые чаты до 10 человек\n"
+            "• Персональные профили\n"
+            "• Рейтинговая система\n"
+            "• Система достижений\n\n"
+            "📱 *Версия:* 1.0\n"
+            "👨‍💻 *Разработчик:* @YourUsername\n\n"
+            "Спасибо, что пользуетесь нашим ботом! 🙏"
+        )
+        
+        await query.edit_message_text(
+            about_text,
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton("⬅️ Назад", callback_data="back_to_menu")]
+            ]),
+            parse_mode="Markdown"
+        )
+        return START
+        
+    elif query.data == "show_stats":
+        # Show detailed statistics
+        user_info = user_data.get(user_id, {})
+        chat_count = user_info.get("chat_count", 0)
+        total_messages = user_info.get("messages_sent", 0)
+        chat_time = user_info.get("chat_time", 0)
+        rating = user_info.get("rating", 0)
+        rating_count = user_info.get("rating_count", 0)
+        
+        # Calculate additional stats
+        avg_messages = round(total_messages / max(chat_count, 1), 1)
+        total_hours = round(chat_time / 3600, 1)
+        first_chat_date = user_info.get("first_chat_date", "Нет данных")
+        
+        stats_text = (
+            "📊 *Подробная статистика*\n\n"
+            f"👥 *Чаты:*\n"
+            f"• Всего чатов: {chat_count}\n"
+            f"• Первый чат: {first_chat_date}\n"
+            f"• Средняя длительность: {round(chat_time / max(chat_count * 60, 1), 1)} мин.\n\n"
+            f"💬 *Сообщения:*\n"
+            f"• Всего отправлено: {total_messages}\n"
+            f"• Среднее в чате: {avg_messages}\n\n"
+            f"⏱ *Время:*\n"
+            f"• Общее время в чатах: {total_hours} ч.\n\n"
+            f"⭐ *Рейтинг:*\n"
+            f"• Средний рейтинг: {rating:.1f}/5\n"
+            f"• Количество оценок: {rating_count}\n"
+        )
+        
+        await query.edit_message_text(
+            stats_text,
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton("⬅️ Назад к профилю", callback_data="profile")]
+            ]),
+            parse_mode="Markdown"
+        )
+        return PROFILE
+    
     return START
 
 async def show_profile(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
@@ -948,27 +1037,35 @@ async def show_profile(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
     
     # Build profile text
     profile_text = (
-        f"👤 *Ваш профиль:*\n\n"
+        f"👤 *Ваш профиль*\n\n"
         f"*Заполнено:* {completion_percentage}% {completion_bar}\n\n"
-        f"*Основная информация:*\n"
+        f"━━━━━━━━━━━━━━━━━━━━━\n"
+        f"📋 *Основная информация:*\n"
         f"• Пол: {gender}\n"
-        f"• Возраст: {age}\n"
-        f"*Интересы:*\n{interests_text}\n\n"
-        f"*📊 Статистика:*\n"
+        f"• Возраст: {age}\n\n"
+        f"🔖 *Интересы:*\n{interests_text}\n"
+        f"━━━━━━━━━━━━━━━━━━━━━\n"
+        f"📊 *Ваша статистика:*\n"
         f"• Всего чатов: {chat_count}\n"
-        f"• Сообщений отправлено: {total_messages}\n"
-        f"• Средняя длительность чата: {avg_duration_min} мин.\n"
+        f"• Сообщений: {total_messages}\n"
+        f"• Средняя длительность: {avg_duration_min} мин.\n"
         f"• Рейтинг: {rating_stars} {rating_trend} ({rating:.1f}/5)\n"
-        f"  На основе {rating_count} оценок\n\n"
-        f"*🏆 Достижения:*\n{achievements_text}"
+        f"  На основе {rating_count} оценок\n"
+        f"━━━━━━━━━━━━━━━━━━━━━\n"
+        f"🏆 *Достижения:*\n{achievements_text}"
     )
     
-    # Create keyboard
+    # Create keyboard with better organization
     keyboard = [
-        [InlineKeyboardButton("📸 Загрузить аватар", callback_data="upload_avatar")],
-        [InlineKeyboardButton("✏️ Редактировать профиль", callback_data="edit_profile")],
-        [InlineKeyboardButton("🔄 Изменить интересы", callback_data="interest_edit")],
-        [InlineKeyboardButton("🔙 Назад", callback_data="back_to_start")]
+        [
+            InlineKeyboardButton("✏️ Изменить профиль", callback_data="edit_profile"),
+            InlineKeyboardButton("📸 Аватар", callback_data="upload_avatar")
+        ],
+        [
+            InlineKeyboardButton("🔄 Интересы", callback_data="interest_edit"),
+            InlineKeyboardButton("📈 Статистика", callback_data="show_stats")
+        ],
+        [InlineKeyboardButton("⬅️ Вернуться в меню", callback_data="back_to_start")]
     ]
     
     # Send avatar if exists
