@@ -7,7 +7,7 @@ import asyncio
 import datetime
 import random
 from typing import Dict, Any, List, Optional
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, ReplyKeyboardMarkup, KeyboardButton, InputFile
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, ReplyKeyboardMarkup, KeyboardButton, InputFile, CallbackQuery
 from telegram.ext import Application, ApplicationBuilder, CommandHandler, CallbackQueryHandler, MessageHandler, filters, ContextTypes, ConversationHandler
 from dotenv import load_dotenv
 import telegram
@@ -487,6 +487,9 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         return START
     
     elif query.data == "back_to_menu" or query.data == "back_to_start":
+        # Save message ID for future reference
+        context.user_data["main_menu_message_id"] = query.message.message_id
+        
         # Go back to main menu
         keyboard = [
             [
@@ -498,13 +501,50 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         ]
         reply_markup = InlineKeyboardMarkup(keyboard)
         
-        await query.edit_message_text(
-            "*Добро пожаловать в DOX Анонимный Чат!* 🎭\n\n"
-            "Выберите действие:",
-            reply_markup=reply_markup,
-            parse_mode="Markdown"
-        )
-        return START
+        try:
+            # Get user stats
+            user_id = str(query.from_user.id)
+            chat_count = user_data.get(user_id, {}).get("chat_count", 0)
+            rating = user_data.get(user_id, {}).get("rating", 0)
+            rating_stars = "⭐" * int(rating) + "☆" * (5 - int(rating))
+            
+            # Create a more visually appealing welcome message
+            welcome_text = (
+                f"*Добро пожаловать в DOX Анонимный Чат!* 🎭\n\n"
+                f"👋 Привет, {query.from_user.first_name}!\n\n"
+                f"🔒 *Анонимность гарантирована*\n"
+                f"💬 *Мгновенный поиск собеседников*\n"
+                f"🌐 *Общение без границ*\n\n"
+            )
+            
+            # Add user stats if they have any chats
+            if chat_count > 0:
+                welcome_text += (
+                    f"📊 *Ваша статистика:*\n"
+                    f"• Количество чатов: {chat_count}\n"
+                )
+                if rating > 0:
+                    welcome_text += f"• Рейтинг: {rating_stars} ({rating:.1f}/5)\n"
+                welcome_text += "\n"
+            
+            welcome_text += "👇 *Выберите действие:* 👇"
+            
+            await query.edit_message_text(
+                text=welcome_text,
+                reply_markup=reply_markup,
+                parse_mode="Markdown"
+            )
+            return START
+        except Exception as e:
+            logger.error(f"Error returning to main menu: {e}", exc_info=True)
+            # Fallback if message can't be edited (e.g., too old)
+            await context.bot.send_message(
+                chat_id=query.message.chat_id,
+                text="Возвращаемся в главное меню...",
+                reply_markup=reply_markup,
+                parse_mode="Markdown"
+            )
+            return START
     
     elif query.data == "group_find":
         return await find_group_chat(update, context)
@@ -861,10 +901,13 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     
     # Handle edit profile
     elif query.data == "edit_profile":
+        # Save message ID for future reference
+        context.user_data["profile_message_id"] = query.message.message_id
+        
         keyboard = [
             [InlineKeyboardButton("👨👩 Изменить пол", callback_data="edit_gender")],
             [InlineKeyboardButton("✏️ Изменить возраст", callback_data="edit_age")],
-            [InlineKeyboardButton("🖼 Загрузить аватар", callback_data="upload_avatar")],
+            [InlineKeyboardButton("📸 Загрузить аватар", callback_data="upload_avatar")],
             [InlineKeyboardButton("🔙 Назад к профилю", callback_data="profile")]
         ]
         
@@ -898,7 +941,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         keyboard = [
             [InlineKeyboardButton("👨👩 Изменить пол", callback_data="edit_gender")],
             [InlineKeyboardButton("✏️ Изменить возраст", callback_data="edit_age")],
-            [InlineKeyboardButton("🖼 Загрузить аватар", callback_data="upload_avatar")],
+            [InlineKeyboardButton("📸 Загрузить аватар", callback_data="upload_avatar")],
             [InlineKeyboardButton("🔙 Назад к профилю", callback_data="profile")]
         ]
         
@@ -1003,6 +1046,9 @@ async def show_profile(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
     query = update.callback_query
     user_id = str(query.from_user.id)
     
+    # Save message ID for future reference
+    context.user_data["profile_message_id"] = query.message.message_id
+    
     user_info = user_data.get(user_id, {})
     gender = "👨 Мужской" if user_info.get("gender") == "male" else "👩 Женский" if user_info.get("gender") == "female" else "❓ Не указан"
     age = user_info.get("age", "❓ Не указан")
@@ -1075,14 +1121,13 @@ async def show_profile(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
     # Create keyboard with better organization
     keyboard = [
         [
-            InlineKeyboardButton("✏️ Изменить профиль", callback_data="edit_profile"),
-            InlineKeyboardButton("📸 Аватар", callback_data="upload_avatar")
+            InlineKeyboardButton("✏️ Редактировать профиль", callback_data="edit_profile"),
+            InlineKeyboardButton("🔄 Интересы", callback_data="interest_edit")
         ],
         [
-            InlineKeyboardButton("🔄 Интересы", callback_data="interest_edit"),
-            InlineKeyboardButton("📈 Статистика", callback_data="show_stats")
-        ],
-        [InlineKeyboardButton("⬅️ Вернуться в меню", callback_data="back_to_start")]
+            InlineKeyboardButton("📈 Статистика", callback_data="show_stats"),
+            InlineKeyboardButton("⬅️ Вернуться в меню", callback_data="back_to_start")
+        ]
     ]
     
     # Send avatar if exists
@@ -1126,48 +1171,64 @@ async def handle_avatar_upload(update: Update, context: ContextTypes.DEFAULT_TYP
             # Save avatar
             avatar_path = await save_avatar(user_id, photo_file)
             
+            # Try to delete user's message with the photo
+            try:
+                await update.message.delete()
+            except Exception as e:
+                logger.error(f"Failed to delete user photo message: {e}")
+            
             if avatar_path:
-                # Show success message and return to profile
-                keyboard = [
-                    [
-                        InlineKeyboardButton("✏️ Изменить профиль", callback_data="edit_profile"),
-                        InlineKeyboardButton("📸 Аватар", callback_data="upload_avatar")
-                    ],
-                    [
-                        InlineKeyboardButton("🔄 Интересы", callback_data="interest_edit"),
-                        InlineKeyboardButton("📈 Статистика", callback_data="show_stats")
-                    ],
-                    [InlineKeyboardButton("⬅️ Вернуться в меню", callback_data="back_to_start")]
-                ]
-                
-                await update.message.reply_text(
-                    text="✅ *Аватар успешно обновлен!*",
-                    reply_markup=InlineKeyboardMarkup(keyboard),
-                    parse_mode="Markdown"
-                )
-                return PROFILE
+                # Return to profile view after successful upload
+                return await show_profile(Update(update.update_id, callback_query=CallbackQuery(
+                    id="profile_from_avatar", 
+                    from_user=update.effective_user,
+                    chat_instance=str(update.effective_chat.id),
+                    data="profile",
+                    message=update.message
+                )), context)
             else:
-                await update.message.reply_text(
+                # Show error message that auto-deletes after a few seconds
+                error_message = await update.message.reply_text(
                     text="❌ *Ошибка при сохранении аватара*\n\nПожалуйста, попробуйте еще раз.",
                     parse_mode="Markdown"
                 )
+                # Schedule message to be deleted after 5 seconds
+                asyncio.create_task(self_delete_message(context, update.effective_chat.id, error_message.message_id, 5))
                 return PROFILE
                 
         except Exception as e:
             logger.error(f"Error handling avatar upload: {e}", exc_info=True)
-            await update.message.reply_text(
+            error_message = await update.message.reply_text(
                 text="❌ *Произошла ошибка при загрузке аватара*\n\nПожалуйста, попробуйте еще раз.",
                 parse_mode="Markdown"
             )
+            # Schedule message to be deleted after 5 seconds
+            asyncio.create_task(self_delete_message(context, update.effective_chat.id, error_message.message_id, 5))
             return PROFILE
     else:
-        await update.message.reply_text(
-            text="📸 *Отправьте фотографию, которую хотите использовать как аватар.*\n\n"
-                 "Или нажмите /cancel для отмены.",
-            parse_mode="Markdown"
-        )
+        # Save original message ID to be able to edit it later
+        if update.message:
+            context.user_data["uploading_avatar"] = True
+            # If this is from a button press, save the message ID
+            if hasattr(update, 'callback_query') and update.callback_query and update.callback_query.message:
+                context.user_data["profile_message_id"] = update.callback_query.message.message_id
+            
+            await update.message.reply_text(
+                text="📸 *Отправьте фотографию, которую хотите использовать как аватар.*\n\n"
+                     "Или нажмите /cancel для отмены.",
+                parse_mode="Markdown"
+            )
     
     return PROFILE
+
+# Helper function to delete messages after a delay
+async def self_delete_message(context, chat_id, message_id, delay=5):
+    """Delete a message after a specified delay in seconds."""
+    await asyncio.sleep(delay)
+    try:
+        await context.bot.delete_message(chat_id=chat_id, message_id=message_id)
+    except Exception as e:
+        logger.error(f"Error deleting message: {e}")
 
 async def find_chat(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Start looking for a chat partner."""
@@ -1468,27 +1529,70 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
                 user_data[user_id]["age"] = age
                 save_user_data(user_data)
                 
-                # Send response back to edit profile menu
-                keyboard = [
-                    [InlineKeyboardButton("👨👩 Изменить пол", callback_data="edit_gender")],
-                    [InlineKeyboardButton("✏️ Изменить возраст", callback_data="edit_age")],
-                    [InlineKeyboardButton("🖼 Загрузить аватар", callback_data="upload_avatar")],
-                    [InlineKeyboardButton("🔙 Назад к профилю", callback_data="profile")]
-                ]
+                # Delete user's message with age
+                try:
+                    await update.message.delete()
+                except Exception as e:
+                    logger.error(f"Failed to delete user message: {e}")
                 
-                await update.message.reply_text(
-                    text=f"✅ *Возраст успешно обновлен на {age}!*\n\n*Редактирование профиля*\n\nВыберите, что хотите изменить:",
-                    reply_markup=InlineKeyboardMarkup(keyboard),
-                    parse_mode="Markdown"
-                )
+                # Edit the original message instead of creating a new one
+                if context.user_data.get("profile_message_id"):
+                    keyboard = [
+                        [InlineKeyboardButton("👨👩 Изменить пол", callback_data="edit_gender")],
+                        [InlineKeyboardButton("✏️ Изменить возраст", callback_data="edit_age")],
+                        [InlineKeyboardButton("🖼 Загрузить аватар", callback_data="upload_avatar")],
+                        [InlineKeyboardButton("🔙 Назад к профилю", callback_data="profile")]
+                    ]
+                    
+                    try:
+                        await context.bot.edit_message_text(
+                            chat_id=update.effective_chat.id,
+                            message_id=context.user_data["profile_message_id"],
+                            text=f"✅ *Возраст успешно обновлен на {age}!*\n\n*Редактирование профиля*\n\nВыберите, что хотите изменить:",
+                            reply_markup=InlineKeyboardMarkup(keyboard),
+                            parse_mode="Markdown"
+                        )
+                    except Exception as e:
+                        logger.error(f"Failed to edit message: {e}", exc_info=True)
+                        # Fall back to sending a new message if editing fails
+                        sent_message = await update.message.reply_text(
+                            text=f"✅ *Возраст успешно обновлен на {age}!*\n\n*Редактирование профиля*\n\nВыберите, что хотите изменить:",
+                            reply_markup=InlineKeyboardMarkup(keyboard),
+                            parse_mode="Markdown"
+                        )
+                        context.user_data["profile_message_id"] = sent_message.message_id
+                else:
+                    # Fall back to sending a new message if we don't have the original message ID
+                    keyboard = [
+                        [InlineKeyboardButton("👨👩 Изменить пол", callback_data="edit_gender")],
+                        [InlineKeyboardButton("✏️ Изменить возраст", callback_data="edit_age")],
+                        [InlineKeyboardButton("🖼 Загрузить аватар", callback_data="upload_avatar")],
+                        [InlineKeyboardButton("🔙 Назад к профилю", callback_data="profile")]
+                    ]
+                    
+                    sent_message = await update.message.reply_text(
+                        text=f"✅ *Возраст успешно обновлен на {age}!*\n\n*Редактирование профиля*\n\nВыберите, что хотите изменить:",
+                        reply_markup=InlineKeyboardMarkup(keyboard),
+                        parse_mode="Markdown"
+                    )
+                    context.user_data["profile_message_id"] = sent_message.message_id
+                
                 del context.user_data["edit_field"]
                 return EDIT_PROFILE
             else:
-                await update.message.reply_text(
-                    "⚠️ Пожалуйста, введите корректный возраст (от 13 до 100).\n\n"
+                # Delete invalid message and notify user
+                try:
+                    await update.message.delete()
+                except Exception as e:
+                    logger.error(f"Failed to delete invalid age message: {e}")
+                
+                message = await update.message.reply_text(
+                    "⚠️ *Пожалуйста, введите корректный возраст (от 13 до 100).*\n\n"
                     "Попробуйте еще раз или нажмите /cancel для отмены.",
                     parse_mode="Markdown"
                 )
+                # Make this message auto-delete after 5 seconds
+                asyncio.create_task(auto_delete_message(update.effective_chat.id, message.message_id, 5))
                 return EDIT_PROFILE
         except ValueError:
             await update.message.reply_text(
