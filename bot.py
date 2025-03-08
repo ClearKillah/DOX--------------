@@ -219,6 +219,12 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
             save_user_data(user_data)
             logger.debug("New user initialized: %s", user_id)
         
+        # Получаем данные пользователя
+        chat_count = user_data[user_id].get("chat_count", 0)
+        rating = user_data[user_id].get("rating", 0)
+        rating_count = user_data[user_id].get("rating_count", 0)
+        rating_stars = "★" * int(rating) + "☆" * (5 - int(rating)) if rating > 0 else ""
+        
         # Create a more visually appealing welcome message
         welcome_text = (
             f"*Добро пожаловать в DOX Анонимный Чат!* 🎭\n\n"
@@ -303,26 +309,95 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
 
 async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Handle button presses."""
-    query = update.callback_query
-    await query.answer()
-    
-    user_id = str(query.from_user.id)
-    
-    # Handle subscription check
-    if query.data == "check_subscription":
-        # User clicked "I subscribed" button
-        channel_name = "твое чудо"
-        channel_url = "https://t.me/+DZnkhC9iv69jYjAy"
-        channel_id = "-1001945632215"  # Use your actual channel ID
+    try:
+        query = update.callback_query
+        await query.answer()
         
-        # Try to verify subscription
-        try:
-            # Check membership
-            member = await context.bot.get_chat_member(chat_id=channel_id, user_id=user_id)
+        user_id = str(query.from_user.id)
+        
+        # Handle subscription check
+        if query.data == "check_subscription":
+            # User clicked "I subscribed" button
+            channel_name = "твое чудо"
+            channel_url = "https://t.me/+DZnkhC9iv69jYjAy"
+            channel_id = "-1001945632215"  # Use your actual channel ID
             
-            if member.status in ['member', 'administrator', 'creator']:
-                # User is subscribed - show welcome message
-                # Remove the "needs_subscription" flag
+            # Try to verify subscription
+            try:
+                # Check membership
+                member = await context.bot.get_chat_member(chat_id=channel_id, user_id=user_id)
+                
+                if member.status in ['member', 'administrator', 'creator']:
+                    # User is subscribed - show welcome message
+                    # Remove the "needs_subscription" flag
+                    if "needs_subscription" in context.user_data:
+                        del context.user_data["needs_subscription"]
+                    
+                    # Mark as verified in user_data
+                    if user_id in user_data:
+                        user_data[user_id]["subscription_verified"] = True
+                        save_user_data(user_data)
+                    
+                    # Create a detailed welcome message
+                    chat_count = user_data.get(user_id, {}).get("chat_count", 0)
+                    rating = user_data.get(user_id, {}).get("rating", 0)
+                    rating_stars = "⭐" * int(rating) + "☆" * (5 - int(rating))
+                    
+                    welcome_text = (
+                        f"✅ *Подписка подтверждена!*\n\n"
+                        f"*Добро пожаловать в DOX Анонимный Чат!* 🎭\n\n"
+                        f"👋 Привет, {query.from_user.first_name}!\n\n"
+                        f"🔒 *Анонимность гарантирована*\n"
+                        f"💬 *Мгновенный поиск собеседников*\n"
+                        f"🌐 *Общение без границ*\n\n"
+                    )
+                    
+                    # Add user stats if they have any chats
+                    if chat_count > 0:
+                        welcome_text += (
+                            f"📊 *Ваша статистика:*\n"
+                            f"• Количество чатов: {chat_count}\n"
+                        )
+                        if rating > 0:
+                            welcome_text += f"• Рейтинг: {rating_stars} ({rating:.1f}/5)\n"
+                        welcome_text += "\n"
+                    
+                    welcome_text += "👇 *Выберите действие:* 👇"
+                    
+                    # Send success message and show main menu
+                    await query.edit_message_text(
+                        welcome_text,
+                        reply_markup=InlineKeyboardMarkup([
+                            [
+                                InlineKeyboardButton("👤 Мой профиль", callback_data="profile")
+                            ],
+                            [
+                                InlineKeyboardButton("🔍 Найти собеседника", callback_data="find_chat"),
+                                InlineKeyboardButton("👥 Групповой чат", callback_data="group_find")
+                            ],
+                            [
+                                InlineKeyboardButton("ℹ️ Помощь", callback_data="help"),
+                                InlineKeyboardButton("🌟 О боте", callback_data="about")
+                            ]
+                        ]),
+                        parse_mode="Markdown"
+                    )
+                    return START
+                else:
+                    # User is still not subscribed
+                    await query.edit_message_text(
+                        f"❌ *Вы все еще не подписаны на канал {channel_name}*\n"
+                        "Пожалуйста, подпишитесь на канал для доступа к боту.",
+                        reply_markup=InlineKeyboardMarkup([
+                            [InlineKeyboardButton("Подписаться на канал", url=channel_url)],
+                            [InlineKeyboardButton("Проверить снова ♻️", callback_data="check_subscription")]
+                        ]),
+                        parse_mode="Markdown"
+                    )
+                    return START
+            except Exception as e:
+                logger.error(f"Error verifying subscription: {e}")
+                # Mark as verified even if verification fails (fallback)
                 if "needs_subscription" in context.user_data:
                     del context.user_data["needs_subscription"]
                 
@@ -331,13 +406,135 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
                     user_data[user_id]["subscription_verified"] = True
                     save_user_data(user_data)
                 
-                # Create a detailed welcome message
+                # Create a full welcome message
                 chat_count = user_data.get(user_id, {}).get("chat_count", 0)
                 rating = user_data.get(user_id, {}).get("rating", 0)
                 rating_stars = "⭐" * int(rating) + "☆" * (5 - int(rating))
                 
                 welcome_text = (
-                    f"✅ *Подписка подтверждена!*\n\n"
+                    f"✅ *Доступ предоставлен!*\n\n"
+                    f"*Добро пожаловать в DOX Анонимный Чат!* 🎭\n\n"
+                    f"👋 Привет, {query.from_user.first_name}!\n\n"
+                    f"🔒 *Анонимность гарантирована*\n"
+                    f"💬 *Мгновенный поиск собеседников*\n"
+                    f"🌐 *Общение без границ*\n\n"
+                )
+                
+                # Add user stats if they have any chats
+                if chat_count > 0:
+                    welcome_text += (
+                        f"📊 *Ваша статистика:*\n"
+                        f"• Количество чатов: {chat_count}\n"
+                    )
+                    if rating > 0:
+                        welcome_text += f"• Рейтинг: {rating_stars} ({rating:.1f}/5)\n"
+                    welcome_text += "\n"
+                
+                welcome_text += "🔽 *Выберите действие:* 🔽"
+                
+                await query.edit_message_text(
+                    welcome_text,
+                    reply_markup=InlineKeyboardMarkup([
+                        [
+                            InlineKeyboardButton("👤 Профиль", callback_data="profile"),
+                            InlineKeyboardButton("🔍 Найти собеседника", callback_data="find_chat")
+                        ],
+                        [InlineKeyboardButton("👥 Групповой чат", callback_data="group_find")],
+                        [InlineKeyboardButton("ℹ️ Помощь", callback_data="help")]
+                    ]),
+                    parse_mode="Markdown"
+                )
+                return START
+        
+        elif query.data == "profile":
+            try:
+                return await show_profile(update, context)
+            except Exception as e:
+                logger.error(f"Error showing profile: {e}", exc_info=True)
+                # Если не удается отредактировать сообщение, отправляем новое
+                keyboard = [
+                    [
+                        InlineKeyboardButton("👤 Профиль", callback_data="profile"),
+                        InlineKeyboardButton("🔍 Найти собеседника", callback_data="find_chat")
+                    ],
+                    [InlineKeyboardButton("👥 Групповой чат", callback_data="group_find")],
+                    [InlineKeyboardButton("ℹ️ Помощь", callback_data="help")]
+                ]
+                await context.bot.send_message(
+                    chat_id=query.message.chat_id,
+                    text="Не удалось загрузить профиль. Вот основное меню:",
+                    reply_markup=InlineKeyboardMarkup(keyboard)
+                )
+                return START
+        
+        elif query.data == "find_chat":
+            return await find_chat(update, context)
+        
+        elif query.data == "help":
+            # Show help information
+            help_text = (
+                "📌 *Руководство по использованию бота*\n\n"
+                "🔍 *Как начать общение:*\n"
+                "• Нажмите кнопку \"Найти собеседника\"\n"
+                "• Дождитесь подключения партнера\n"
+                "• Начните диалог\n\n"
+                
+                "👥 *Групповой чат:*\n"
+                "• Создайте свою группу или присоединитесь к существующей\n"
+                "• Общайтесь одновременно с несколькими людьми\n"
+                "• Получите код для приглашения друзей\n\n"
+                
+                "✏️ *Полезные команды:*\n"
+                "• /start - перезапустить бота\n"
+                "• /end - завершить текущий чат\n"
+                "• /profile - показать свой профиль\n"
+                "• /report - пожаловаться на собеседника\n\n"
+                
+                "👤 *Профиль:*\n"
+                "• Заполните информацию о себе\n"
+                "• Загрузите аватар (виден только вам)\n"
+                "• Укажите интересы для лучшего поиска\n\n"
+                
+                "🏆 *Достижения:*\n"
+                "• Зарабатывайте достижения за активность\n"
+                "• Улучшайте свой рейтинг для большей популярности\n\n"
+                
+                "Если у вас остались вопросы, свяжитесь с нашей поддержкой: @YourSupportUsername"
+            )
+            
+            await query.edit_message_text(
+                help_text,
+                reply_markup=InlineKeyboardMarkup([
+                    [InlineKeyboardButton("⬅️ Вернуться в меню", callback_data="back_to_menu")]
+                ]),
+                parse_mode="Markdown"
+            )
+            return START
+        
+        elif query.data == "back_to_menu" or query.data == "back_to_start":
+            # Save message ID for future reference
+            context.user_data["main_menu_message_id"] = query.message.message_id
+            
+            # Go back to main menu
+            keyboard = [
+                [
+                    InlineKeyboardButton("👤 Профиль", callback_data="profile"),
+                    InlineKeyboardButton("🔍 Найти собеседника", callback_data="find_chat")
+                ],
+                [InlineKeyboardButton("👥 Групповой чат", callback_data="group_find")],
+                [InlineKeyboardButton("ℹ️ Помощь", callback_data="help")]
+            ]
+            reply_markup = InlineKeyboardMarkup(keyboard)
+            
+            try:
+                # Get user stats
+                user_id = str(query.from_user.id)
+                chat_count = user_data.get(user_id, {}).get("chat_count", 0)
+                rating = user_data.get(user_id, {}).get("rating", 0)
+                rating_stars = "⭐" * int(rating) + "☆" * (5 - int(rating))
+                
+                # Create a more visually appealing welcome message
+                welcome_text = (
                     f"*Добро пожаловать в DOX Анонимный Чат!* 🎭\n\n"
                     f"👋 Привет, {query.from_user.first_name}!\n\n"
                     f"🔒 *Анонимность гарантирована*\n"
@@ -357,155 +554,304 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
                 
                 welcome_text += "👇 *Выберите действие:* 👇"
                 
-                # Send success message and show main menu
-                await query.edit_message_text(
-                    welcome_text,
-                    reply_markup=InlineKeyboardMarkup([
-                        [
-                            InlineKeyboardButton("👤 Мой профиль", callback_data="profile")
-                        ],
-                        [
-                            InlineKeyboardButton("🔍 Найти собеседника", callback_data="find_chat"),
-                            InlineKeyboardButton("👥 Групповой чат", callback_data="group_find")
-                        ],
-                        [
-                            InlineKeyboardButton("ℹ️ Помощь", callback_data="help"),
-                            InlineKeyboardButton("🌟 О боте", callback_data="about")
-                        ]
-                    ]),
+                try:
+                    # Пытаемся отредактировать существующее сообщение
+                    await query.edit_message_text(
+                        text=welcome_text,
+                        reply_markup=reply_markup,
+                        parse_mode="Markdown"
+                    )
+                except Exception as e:
+                    logger.error(f"Error editing message: {e}", exc_info=True)
+                    # Если не удалось отредактировать, отправляем новое сообщение
+                    await context.bot.send_message(
+                        chat_id=query.message.chat_id,
+                        text=welcome_text,
+                        reply_markup=reply_markup,
+                        parse_mode="Markdown"
+                    )
+                return START
+            except Exception as e:
+                logger.error(f"Error returning to main menu: {e}", exc_info=True)
+                # Fallback if message can't be edited (e.g., too old)
+                await context.bot.send_message(
+                    chat_id=query.message.chat_id,
+                    text="Возвращаемся в главное меню...",
+                    reply_markup=reply_markup,
                     parse_mode="Markdown"
                 )
                 return START
-            else:
-                # User is still not subscribed
+        
+        elif query.data == "group_find":
+            return await find_group_chat(update, context)
+        
+        elif query.data == "group_create":
+            # Create a new group
+            return await create_group_chat(update, context)
+        
+        elif query.data == "group_join":
+            # Join an existing group
+            return await join_group_chat(update, context)
+        
+        elif query.data.startswith("group_leave_"):
+            # Handle group leave request
+            group_id = query.data.split("group_leave_")[1]
+            return await leave_group_chat(update, context, group_id)
+        
+        elif query.data.startswith("group_invite_"):
+            # Show invite code for a group
+            group_id = query.data.split("group_invite_")[1]
+            
+            if group_id not in group_chats:
                 await query.edit_message_text(
-                    f"❌ *Вы все еще не подписаны на канал {channel_name}*\n"
-                    "Пожалуйста, подпишитесь на канал для доступа к боту.",
-                    reply_markup=InlineKeyboardMarkup([
-                        [InlineKeyboardButton("Подписаться на канал", url=channel_url)],
-                        [InlineKeyboardButton("Проверить снова ♻️", callback_data="check_subscription")]
-                    ]),
+                    text="❌ *Группа не найдена*",
                     parse_mode="Markdown"
                 )
                 return START
-        except Exception as e:
-            logger.error(f"Error verifying subscription: {e}")
-            # Mark as verified even if verification fails (fallback)
-            if "needs_subscription" in context.user_data:
-                del context.user_data["needs_subscription"]
             
-            # Mark as verified in user_data
-            if user_id in user_data:
-                user_data[user_id]["subscription_verified"] = True
-                save_user_data(user_data)
+            invite_code = group_chats[group_id].get("invite_code")
             
-            # Create a full welcome message
-            chat_count = user_data.get(user_id, {}).get("chat_count", 0)
-            rating = user_data.get(user_id, {}).get("rating", 0)
-            rating_stars = "⭐" * int(rating) + "☆" * (5 - int(rating))
-            
-            welcome_text = (
-                f"✅ *Доступ предоставлен!*\n\n"
-                f"*Добро пожаловать в DOX Анонимный Чат!* 🎭\n\n"
-                f"👋 Привет, {query.from_user.first_name}!\n\n"
-                f"🔒 *Анонимность гарантирована*\n"
-                f"💬 *Мгновенный поиск собеседников*\n"
-                f"🌐 *Общение без границ*\n\n"
-            )
-            
-            # Add user stats if they have any chats
-            if chat_count > 0:
-                welcome_text += (
-                    f"📊 *Ваша статистика:*\n"
-                    f"• Количество чатов: {chat_count}\n"
-                )
-                if rating > 0:
-                    welcome_text += f"• Рейтинг: {rating_stars} ({rating:.1f}/5)\n"
-                welcome_text += "\n"
-            
-            welcome_text += "🔽 *Выберите действие:* 🔽"
+            keyboard = [
+                [InlineKeyboardButton("🚪 Покинуть группу", callback_data=f"group_leave_{group_id}")],
+                [InlineKeyboardButton("🔙 Назад", callback_data="back_to_start")]
+            ]
             
             await query.edit_message_text(
-                welcome_text,
-                reply_markup=InlineKeyboardMarkup([
-                    [
-                        InlineKeyboardButton("👤 Профиль", callback_data="profile"),
-                        InlineKeyboardButton("🔍 Найти собеседника", callback_data="find_chat")
-                    ],
-                    [InlineKeyboardButton("👥 Групповой чат", callback_data="group_find")],
-                    [InlineKeyboardButton("ℹ️ Помощь", callback_data="help")]
-                ]),
+                text=f"👥 *Код приглашения в группу*\n\n"
+                     f"Поделитесь этим кодом с друзьями:\n"
+                     f"`{invite_code}`\n\n"
+                     f"Участники: {len(group_chats[group_id]['members'])}/{GROUP_MAX_MEMBERS}",
+                reply_markup=InlineKeyboardMarkup(keyboard),
+                parse_mode="Markdown"
+            )
+            return GROUP_CHATTING
+        
+        elif query.data.startswith("group_join_"):
+            # Handle direct group join by ID
+            group_id = query.data.split("group_join_")[1]
+            
+            user_id = str(query.from_user.id)
+            
+            if group_id not in group_chats:
+                await query.edit_message_text(
+                    text="❌ *Группа не найдена*\n\n"
+                         "Возможно, эта группа больше не существует.",
+                    parse_mode="Markdown"
+                )
+                return START
+            
+            # Check if group is full
+            if len(group_chats[group_id]["members"]) >= GROUP_MAX_MEMBERS:
+                keyboard = [
+                    [InlineKeyboardButton("🔍 Присоединиться к другой группе", callback_data="group_join")],
+                    [InlineKeyboardButton("🆕 Создать новую группу", callback_data="group_create")],
+                    [InlineKeyboardButton("🔙 Назад", callback_data="back_to_start")]
+                ]
+                
+                await query.edit_message_text(
+                    text="⚠️ *Группа заполнена*\n\n"
+                         "В этой группе уже максимальное количество участников.",
+                    reply_markup=InlineKeyboardMarkup(keyboard),
+                    parse_mode="Markdown"
+                )
+                return GROUP_CHATTING
+            
+            # Check if user is already in this group
+            if user_id in group_chats[group_id]["members"]:
+                keyboard = [
+                    [InlineKeyboardButton("🚪 Покинуть группу", callback_data=f"group_leave_{group_id}")],
+                    [InlineKeyboardButton("🔙 Назад", callback_data="back_to_start")]
+                ]
+                
+                await query.edit_message_text(
+                    text="⚠️ *Вы уже состоите в этой группе*",
+                    reply_markup=InlineKeyboardMarkup(keyboard),
+                    parse_mode="Markdown"
+                )
+                return GROUP_CHATTING
+            
+            # Add user to group
+            group_chats[group_id]["members"].append(user_id)
+            
+            # Fetch member names
+            group_info = group_chats[group_id]
+            member_list = ""
+            for member_id in group_info["members"]:
+                try:
+                    member_info = await context.bot.get_chat(int(member_id))
+                    member_list += f"• {member_info.first_name}\n"
+                except Exception as e:
+                    logger.error(f"Error fetching member info: {e}")
+                    member_list += f"• Пользователь {member_id}\n"
+            
+            # Notify user
+            keyboard = [
+                [InlineKeyboardButton("🚪 Покинуть группу", callback_data=f"group_leave_{group_id}")],
+                [InlineKeyboardButton("🔙 Назад", callback_data="back_to_start")]
+            ]
+            
+            await query.edit_message_text(
+                text=f"✅ *Вы присоединились к группе!*\n\n"
+                     f"Название: {group_info['name']}\n"
+                     f"Участники: {len(group_info['members'])}/{GROUP_MAX_MEMBERS}\n\n"
+                     f"Текущие участники:\n{member_list}\n"
+                     f"Все сообщения в этом чате анонимны.",
+                reply_markup=InlineKeyboardMarkup(keyboard),
+                parse_mode="Markdown"
+            )
+            
+            # Notify other members that someone joined
+            for member_id in group_info["members"]:
+                if member_id != user_id:  # Don't notify the user who just joined
+                    try:
+                        await context.bot.send_message(
+                            chat_id=int(member_id),
+                            text=f"👋 *Новый участник присоединился к группе!*\n\n"
+                                 f"В группе теперь {len(group_info['members'])} участников.",
+                            parse_mode="Markdown"
+                        )
+                    except Exception as e:
+                        logger.error(f"Error notifying group member {member_id}: {e}")
+            
+            return GROUP_CHATTING
+        
+        elif query.data == "group_enter_code":
+            # Allow user to enter an invite code manually
+            await query.edit_message_text(
+                text="🔑 *Введите код приглашения*\n\n"
+                     "Отправьте код приглашения, который вам дал создатель группы.",
+                parse_mode="Markdown"
+            )
+            
+            # Set flag so handle_group_message will process the invite code
+            context.user_data["joining_group"] = True
+            return GROUP_CHATTING
+        
+        elif query.data == "cancel_search":
+            # Remove user from searching list
+            if user_id in searching_users:
+                del searching_users[user_id]
+            
+            keyboard = [
+                [
+                    InlineKeyboardButton("👤 Профиль", callback_data="profile"),
+                    InlineKeyboardButton("🔍 Найти собеседника", callback_data="find_chat")
+                ]
+            ]
+            
+            await query.edit_message_text(
+                text="❌ *Поиск отменен*\n\nВыберите действие:",
+                reply_markup=InlineKeyboardMarkup(keyboard),
                 parse_mode="Markdown"
             )
             return START
-    
-    elif query.data == "profile":
-        return await show_profile(update, context)
-    
-    elif query.data == "find_chat":
-        return await find_chat(update, context)
-    
-    elif query.data == "help":
-        # Show help information
-        help_text = (
-            "📌 *Руководство по использованию бота*\n\n"
-            "🔍 *Как начать общение:*\n"
-            "• Нажмите кнопку \"Найти собеседника\"\n"
-            "• Дождитесь подключения партнера\n"
-            "• Начните диалог\n\n"
-            
-            "👥 *Групповой чат:*\n"
-            "• Создайте свою группу или присоединитесь к существующей\n"
-            "• Общайтесь одновременно с несколькими людьми\n"
-            "• Получите код для приглашения друзей\n\n"
-            
-            "✏️ *Полезные команды:*\n"
-            "• /start - перезапустить бота\n"
-            "• /end - завершить текущий чат\n"
-            "• /profile - показать свой профиль\n"
-            "• /report - пожаловаться на собеседника\n\n"
-            
-            "👤 *Профиль:*\n"
-            "• Заполните информацию о себе\n"
-            "• Загрузите аватар (виден только вам)\n"
-            "• Укажите интересы для лучшего поиска\n\n"
-            
-            "🏆 *Достижения:*\n"
-            "• Зарабатывайте достижения за активность\n"
-            "• Улучшайте свой рейтинг для большей популярности\n\n"
-            
-            "Если у вас остались вопросы, свяжитесь с нашей поддержкой: @YourSupportUsername"
-        )
         
-        await query.edit_message_text(
-            help_text,
-            reply_markup=InlineKeyboardMarkup([
-                [InlineKeyboardButton("⬅️ Вернуться в меню", callback_data="back_to_menu")]
-            ]),
-            parse_mode="Markdown"
-        )
-        return START
-    
-    elif query.data == "back_to_menu" or query.data == "back_to_start":
-        # Save message ID for future reference
-        context.user_data["main_menu_message_id"] = query.message.message_id
+        elif query.data == "skip_user":
+            # Skip current chat partner and find a new one
+            if user_id in active_chats:
+                partner_id = active_chats[user_id]
+                
+                # Notify partner that chat has ended
+                if partner_id in active_chats:
+                    try:
+                        await context.bot.send_message(
+                            chat_id=int(partner_id),
+                            text="❌ *Собеседник покинул чат*\n\nВыберите действие:",
+                            parse_mode="Markdown",
+                            reply_markup=InlineKeyboardMarkup([
+                                [InlineKeyboardButton("🔍 Найти нового собеседника", callback_data="find_chat")],
+                                [InlineKeyboardButton("👤 Профиль", callback_data="profile")]
+                            ])
+                        )
+                        del active_chats[partner_id]
+                    except Exception as e:
+                        logger.error(f"Error notifying partner: {e}")
+                
+                del active_chats[user_id]
+            
+            # Start new search
+            search_message = await query.edit_message_text(
+                text="🔍 *Поиск собеседника...*\n\n⏱ Время поиска: 00:00",
+                parse_mode="Markdown",
+                reply_markup=InlineKeyboardMarkup([
+                    [InlineKeyboardButton("❌ Отменить поиск", callback_data="cancel_search")]
+                ])
+            )
+            
+            # Add user to searching users
+            searching_users[user_id] = {
+                "start_time": time.time(),
+                "message_id": search_message.message_id,
+                "chat_id": query.message.chat_id
+            }
+            
+            # Start continuous search in background
+            asyncio.create_task(continuous_search(user_id, context))
+            
+            return START
         
-        # Go back to main menu
-        keyboard = [
-            [
-                InlineKeyboardButton("👤 Профиль", callback_data="profile"),
-                InlineKeyboardButton("🔍 Найти собеседника", callback_data="find_chat")
-            ],
-            [InlineKeyboardButton("👥 Групповой чат", callback_data="group_find")],
-            [InlineKeyboardButton("ℹ️ Помощь", callback_data="help")]
-        ]
-        reply_markup = InlineKeyboardMarkup(keyboard)
+        elif query.data == "end_chat":
+            return await end_chat(update, context)
         
-        try:
+        elif query.data.startswith("rate_"):
+            # Handle rating
+            parts = query.data.split("_")
+            if len(parts) == 3:
+                partner_id = parts[1]
+                rating = int(parts[2])
+                
+                # Save rating
+                if partner_id in user_data:
+                    ratings = user_data[partner_id].get("ratings", [])
+                    ratings.append(rating)
+                    user_data[partner_id]["ratings"] = ratings
+                    user_data[partner_id]["avg_rating"] = sum(ratings) / len(ratings)
+                    save_user_data(user_data)
+                
+                await query.edit_message_text(
+                    text=f"✅ *Спасибо за оценку!*\n\nВы поставили {rating} {'⭐' * rating}",
+                    parse_mode="Markdown",
+                    reply_markup=InlineKeyboardMarkup([
+                        [InlineKeyboardButton("🔍 Найти нового собеседника", callback_data="find_chat")],
+                        [InlineKeyboardButton("👤 Профиль", callback_data="profile")]
+                    ])
+                )
+            else:
+                await query.edit_message_text(
+                    text="❌ *Ошибка при оценке собеседника*",
+                    parse_mode="Markdown",
+                    reply_markup=InlineKeyboardMarkup([
+                        [InlineKeyboardButton("🔍 Найти нового собеседника", callback_data="find_chat")],
+                        [InlineKeyboardButton("👤 Профиль", callback_data="profile")]
+                    ])
+                )
+            return START
+        
+        elif query.data == "skip_rating":
+            await query.edit_message_text(
+                text="✅ *Оценка пропущена*",
+                parse_mode="Markdown",
+                reply_markup=InlineKeyboardMarkup([
+                    [InlineKeyboardButton("🔍 Найти нового собеседника", callback_data="find_chat")],
+                    [InlineKeyboardButton("👤 Профиль", callback_data="profile")]
+                ])
+            )
+            return START
+        
+        elif query.data == "back_to_start":
+            keyboard = [
+                [
+                    InlineKeyboardButton("👤 Профиль", callback_data="profile"),
+                    InlineKeyboardButton("🔍 Найти собеседника", callback_data="find_chat")
+                ],
+                [InlineKeyboardButton("👥 Групповой чат", callback_data="group_find")],
+                [InlineKeyboardButton("ℹ️ Помощь", callback_data="help")]
+            ]
+            
             # Get user stats
             user_id = str(query.from_user.id)
-            chat_count = user_data.get(user_id, {}).get("chat_count", 0)
-            rating = user_data.get(user_id, {}).get("rating", 0)
+            chat_count = user_data[user_id].get("chat_count", 0)
+            rating = user_data[user_id].get("rating", 0)
             rating_stars = "⭐" * int(rating) + "☆" * (5 - int(rating))
             
             # Create a more visually appealing welcome message
@@ -531,629 +877,392 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
             
             await query.edit_message_text(
                 text=welcome_text,
-                reply_markup=reply_markup,
-                parse_mode="Markdown"
-            )
-            return START
-        except Exception as e:
-            logger.error(f"Error returning to main menu: {e}", exc_info=True)
-            # Fallback if message can't be edited (e.g., too old)
-            await context.bot.send_message(
-                chat_id=query.message.chat_id,
-                text="Возвращаемся в главное меню...",
-                reply_markup=reply_markup,
-                parse_mode="Markdown"
-            )
-            return START
-    
-    elif query.data == "group_find":
-        return await find_group_chat(update, context)
-    
-    elif query.data == "group_create":
-        # Create a new group
-        return await create_group_chat(update, context)
-    
-    elif query.data == "group_join":
-        # Join an existing group
-        return await join_group_chat(update, context)
-    
-    elif query.data.startswith("group_leave_"):
-        # Handle group leave request
-        group_id = query.data.split("group_leave_")[1]
-        return await leave_group_chat(update, context, group_id)
-    
-    elif query.data.startswith("group_invite_"):
-        # Show invite code for a group
-        group_id = query.data.split("group_invite_")[1]
-        
-        if group_id not in group_chats:
-            await query.edit_message_text(
-                text="❌ *Группа не найдена*",
-                parse_mode="Markdown"
-            )
-            return START
-        
-        invite_code = group_chats[group_id].get("invite_code")
-        
-        keyboard = [
-            [InlineKeyboardButton("🚪 Покинуть группу", callback_data=f"group_leave_{group_id}")],
-            [InlineKeyboardButton("🔙 Назад", callback_data="back_to_start")]
-        ]
-        
-        await query.edit_message_text(
-            text=f"👥 *Код приглашения в группу*\n\n"
-                 f"Поделитесь этим кодом с друзьями:\n"
-                 f"`{invite_code}`\n\n"
-                 f"Участники: {len(group_chats[group_id]['members'])}/{GROUP_MAX_MEMBERS}",
-            reply_markup=InlineKeyboardMarkup(keyboard),
-            parse_mode="Markdown"
-        )
-        return GROUP_CHATTING
-    
-    elif query.data.startswith("group_join_"):
-        # Handle direct group join by ID
-        group_id = query.data.split("group_join_")[1]
-        
-        user_id = str(query.from_user.id)
-        
-        if group_id not in group_chats:
-            await query.edit_message_text(
-                text="❌ *Группа не найдена*\n\n"
-                     "Возможно, эта группа больше не существует.",
-                parse_mode="Markdown"
-            )
-            return START
-        
-        # Check if group is full
-        if len(group_chats[group_id]["members"]) >= GROUP_MAX_MEMBERS:
-            keyboard = [
-                [InlineKeyboardButton("🔍 Присоединиться к другой группе", callback_data="group_join")],
-                [InlineKeyboardButton("🆕 Создать новую группу", callback_data="group_create")],
-                [InlineKeyboardButton("🔙 Назад", callback_data="back_to_start")]
-            ]
-            
-            await query.edit_message_text(
-                text="⚠️ *Группа заполнена*\n\n"
-                     "В этой группе уже максимальное количество участников.",
                 reply_markup=InlineKeyboardMarkup(keyboard),
                 parse_mode="Markdown"
             )
-            return GROUP_CHATTING
+            return START
         
-        # Check if user is already in this group
-        if user_id in group_chats[group_id]["members"]:
+        # Handle interest edit button
+        elif query.data == "interest_edit":
             keyboard = [
-                [InlineKeyboardButton("🚪 Покинуть группу", callback_data=f"group_leave_{group_id}")],
-                [InlineKeyboardButton("🔙 Назад", callback_data="back_to_start")]
+                [InlineKeyboardButton("💘 Флирт", callback_data="interest_flirt")],
+                [InlineKeyboardButton("💬 Общение", callback_data="interest_chat")],
+                [InlineKeyboardButton("🔙 Назад к профилю", callback_data="profile")]
             ]
             
+            # Get current interests to show selection state
+            if user_id in user_data:
+                interests = user_data[user_id].get("interests", [])
+                keyboard = [
+                    [InlineKeyboardButton("💘 Флирт " + ("✅" if "flirt" in interests else ""), callback_data="interest_flirt")],
+                    [InlineKeyboardButton("💬 Общение " + ("✅" if "chat" in interests else ""), callback_data="interest_chat")],
+                    [InlineKeyboardButton("🔙 Назад к профилю", callback_data="profile")]
+                ]
+            
             await query.edit_message_text(
-                text="⚠️ *Вы уже состоите в этой группе*",
+                text="*Выберите ваши интересы:*\n\nВыбранные интересы помогают находить собеседников со схожими интересами.",
                 reply_markup=InlineKeyboardMarkup(keyboard),
                 parse_mode="Markdown"
             )
-            return GROUP_CHATTING
+            return PROFILE
         
-        # Add user to group
-        group_chats[group_id]["members"].append(user_id)
-        
-        # Fetch member names
-        group_info = group_chats[group_id]
-        member_list = ""
-        for member_id in group_info["members"]:
-            try:
-                member_info = await context.bot.get_chat(int(member_id))
-                member_list += f"• {member_info.first_name}\n"
-            except Exception as e:
-                logger.error(f"Error fetching member info: {e}")
-                member_list += f"• Пользователь {member_id}\n"
-        
-        # Notify user
-        keyboard = [
-            [InlineKeyboardButton("🚪 Покинуть группу", callback_data=f"group_leave_{group_id}")],
-            [InlineKeyboardButton("🔙 Назад", callback_data="back_to_start")]
-        ]
-        
-        await query.edit_message_text(
-            text=f"✅ *Вы присоединились к группе!*\n\n"
-                 f"Название: {group_info['name']}\n"
-                 f"Участники: {len(group_info['members'])}/{GROUP_MAX_MEMBERS}\n\n"
-                 f"Текущие участники:\n{member_list}\n"
-                 f"Все сообщения в этом чате анонимны.",
-            reply_markup=InlineKeyboardMarkup(keyboard),
-            parse_mode="Markdown"
-        )
-        
-        # Notify other members that someone joined
-        for member_id in group_info["members"]:
-            if member_id != user_id:  # Don't notify the user who just joined
-                try:
-                    await context.bot.send_message(
-                        chat_id=int(member_id),
-                        text=f"👋 *Новый участник присоединился к группе!*\n\n"
-                             f"В группе теперь {len(group_info['members'])} участников.",
-                        parse_mode="Markdown"
-                    )
-                except Exception as e:
-                    logger.error(f"Error notifying group member {member_id}: {e}")
-        
-        return GROUP_CHATTING
-    
-    elif query.data == "group_enter_code":
-        # Allow user to enter an invite code manually
-        await query.edit_message_text(
-            text="🔑 *Введите код приглашения*\n\n"
-                 "Отправьте код приглашения, который вам дал создатель группы.",
-            parse_mode="Markdown"
-        )
-        
-        # Set flag so handle_group_message will process the invite code
-        context.user_data["joining_group"] = True
-        return GROUP_CHATTING
-    
-    elif query.data == "cancel_search":
-        # Remove user from searching list
-        if user_id in searching_users:
-            del searching_users[user_id]
-        
-        keyboard = [
-            [
-                InlineKeyboardButton("👤 Профиль", callback_data="profile"),
-                InlineKeyboardButton("🔍 Найти собеседника", callback_data="find_chat")
-            ]
-        ]
-        
-        await query.edit_message_text(
-            text="❌ *Поиск отменен*\n\nВыберите действие:",
-            reply_markup=InlineKeyboardMarkup(keyboard),
-            parse_mode="Markdown"
-        )
-        return START
-    
-    elif query.data == "skip_user":
-        # Skip current chat partner and find a new one
-        if user_id in active_chats:
-            partner_id = active_chats[user_id]
+        # Handle interest selection
+        elif query.data.startswith("interest_"):
+            interest = query.data.split("_")[1]
             
-            # Notify partner that chat has ended
-            if partner_id in active_chats:
-                try:
-                    await context.bot.send_message(
-                        chat_id=int(partner_id),
-                        text="❌ *Собеседник покинул чат*\n\nВыберите действие:",
-                        parse_mode="Markdown",
-                        reply_markup=InlineKeyboardMarkup([
-                            [InlineKeyboardButton("🔍 Найти нового собеседника", callback_data="find_chat")],
-                            [InlineKeyboardButton("👤 Профиль", callback_data="profile")]
-                        ])
-                    )
-                    del active_chats[partner_id]
-                except Exception as e:
-                    logger.error(f"Error notifying partner: {e}")
-            
-            del active_chats[user_id]
-        
-        # Start new search
-        search_message = await query.edit_message_text(
-            text="🔍 *Поиск собеседника...*\n\n⏱ Время поиска: 00:00",
-            parse_mode="Markdown",
-            reply_markup=InlineKeyboardMarkup([
-                [InlineKeyboardButton("❌ Отменить поиск", callback_data="cancel_search")]
-            ])
-        )
-        
-        # Add user to searching users
-        searching_users[user_id] = {
-            "start_time": time.time(),
-            "message_id": search_message.message_id,
-            "chat_id": query.message.chat_id
-        }
-        
-        # Start continuous search in background
-        asyncio.create_task(continuous_search(user_id, context))
-        
-        return START
-    
-    elif query.data == "end_chat":
-        return await end_chat(update, context)
-    
-    elif query.data.startswith("rate_"):
-        # Handle rating
-        parts = query.data.split("_")
-        if len(parts) == 3:
-            partner_id = parts[1]
-            rating = int(parts[2])
-            
-            # Save rating
-            if partner_id in user_data:
-                ratings = user_data[partner_id].get("ratings", [])
-                ratings.append(rating)
-                user_data[partner_id]["ratings"] = ratings
-                user_data[partner_id]["avg_rating"] = sum(ratings) / len(ratings)
+            if user_id in user_data:
+                interests = user_data[user_id].get("interests", [])
+                
+                if interest in interests:
+                    interests.remove(interest)
+                else:
+                    interests.append(interest)
+                
+                user_data[user_id]["interests"] = interests
                 save_user_data(user_data)
             
-            await query.edit_message_text(
-                text=f"✅ *Спасибо за оценку!*\n\nВы поставили {rating} {'⭐' * rating}",
-                parse_mode="Markdown",
-                reply_markup=InlineKeyboardMarkup([
-                    [InlineKeyboardButton("🔍 Найти нового собеседника", callback_data="find_chat")],
-                    [InlineKeyboardButton("👤 Профиль", callback_data="profile")]
-                ])
-            )
-        else:
-            await query.edit_message_text(
-                text="❌ *Ошибка при оценке собеседника*",
-                parse_mode="Markdown",
-                reply_markup=InlineKeyboardMarkup([
-                    [InlineKeyboardButton("🔍 Найти нового собеседника", callback_data="find_chat")],
-                    [InlineKeyboardButton("👤 Профиль", callback_data="profile")]
-                ])
-            )
-        return START
-    
-    elif query.data == "skip_rating":
-        await query.edit_message_text(
-            text="✅ *Оценка пропущена*",
-            parse_mode="Markdown",
-            reply_markup=InlineKeyboardMarkup([
-                [InlineKeyboardButton("🔍 Найти нового собеседника", callback_data="find_chat")],
-                [InlineKeyboardButton("👤 Профиль", callback_data="profile")]
-            ])
-        )
-        return START
-    
-    elif query.data == "back_to_start":
-        keyboard = [
-            [
-                InlineKeyboardButton("👤 Профиль", callback_data="profile"),
-                InlineKeyboardButton("🔍 Найти собеседника", callback_data="find_chat")
-            ],
-            [InlineKeyboardButton("👥 Групповой чат", callback_data="group_find")],
-            [InlineKeyboardButton("ℹ️ Помощь", callback_data="help")]
-        ]
-        
-        # Get user stats
-        user_id = str(query.from_user.id)
-        chat_count = user_data[user_id].get("chat_count", 0)
-        rating = user_data[user_id].get("rating", 0)
-        rating_stars = "⭐" * int(rating) + "☆" * (5 - int(rating))
-        
-        # Create a more visually appealing welcome message
-        welcome_text = (
-            f"*Добро пожаловать в DOX Анонимный Чат!* 🎭\n\n"
-            f"👋 Привет, {query.from_user.first_name}!\n\n"
-            f"🔒 *Анонимность гарантирована*\n"
-            f"💬 *Мгновенный поиск собеседников*\n"
-            f"🌐 *Общение без границ*\n\n"
-        )
-        
-        # Add user stats if they have any chats
-        if chat_count > 0:
-            welcome_text += (
-                f"📊 *Ваша статистика:*\n"
-                f"• Количество чатов: {chat_count}\n"
-            )
-            if rating > 0:
-                welcome_text += f"• Рейтинг: {rating_stars} ({rating:.1f}/5)\n"
-            welcome_text += "\n"
-        
-        welcome_text += "👇 *Выберите действие:* 👇"
-        
-        await query.edit_message_text(
-            text=welcome_text,
-            reply_markup=InlineKeyboardMarkup(keyboard),
-            parse_mode="Markdown"
-        )
-        return START
-    
-    # Handle interest edit button
-    elif query.data == "interest_edit":
-        keyboard = [
-            [InlineKeyboardButton("💘 Флирт", callback_data="interest_flirt")],
-            [InlineKeyboardButton("💬 Общение", callback_data="interest_chat")],
-            [InlineKeyboardButton("🔙 Назад к профилю", callback_data="profile")]
-        ]
-        
-        # Get current interests to show selection state
-        if user_id in user_data:
-            interests = user_data[user_id].get("interests", [])
+            # Show updated interests selection menu
             keyboard = [
                 [InlineKeyboardButton("💘 Флирт " + ("✅" if "flirt" in interests else ""), callback_data="interest_flirt")],
                 [InlineKeyboardButton("💬 Общение " + ("✅" if "chat" in interests else ""), callback_data="interest_chat")],
                 [InlineKeyboardButton("🔙 Назад к профилю", callback_data="profile")]
             ]
-        
-        await query.edit_message_text(
-            text="*Выберите ваши интересы:*\n\nВыбранные интересы помогают находить собеседников со схожими интересами.",
-            reply_markup=InlineKeyboardMarkup(keyboard),
-            parse_mode="Markdown"
-        )
-        return PROFILE
-    
-    # Handle interest selection
-    elif query.data.startswith("interest_"):
-        interest = query.data.split("_")[1]
-        
-        if user_id in user_data:
-            interests = user_data[user_id].get("interests", [])
             
-            if interest in interests:
-                interests.remove(interest)
-            else:
-                interests.append(interest)
+            await query.edit_message_text(
+                text="*Выберите ваши интересы:*\n\nВыбранные интересы помогают находить собеседников со схожими интересами.",
+                reply_markup=InlineKeyboardMarkup(keyboard),
+                parse_mode="Markdown"
+            )
+            return PROFILE
+        
+        # Handle edit profile
+        elif query.data == "edit_profile":
+            # Save message ID for future reference
+            context.user_data["profile_message_id"] = query.message.message_id
             
-            user_data[user_id]["interests"] = interests
-            save_user_data(user_data)
-        
-        # Show updated interests selection menu
-        keyboard = [
-            [InlineKeyboardButton("💘 Флирт " + ("✅" if "flirt" in interests else ""), callback_data="interest_flirt")],
-            [InlineKeyboardButton("💬 Общение " + ("✅" if "chat" in interests else ""), callback_data="interest_chat")],
-            [InlineKeyboardButton("🔙 Назад к профилю", callback_data="profile")]
-        ]
-        
-        await query.edit_message_text(
-            text="*Выберите ваши интересы:*\n\nВыбранные интересы помогают находить собеседников со схожими интересами.",
-            reply_markup=InlineKeyboardMarkup(keyboard),
-            parse_mode="Markdown"
-        )
-        return PROFILE
-    
-    # Handle edit profile
-    elif query.data == "edit_profile":
-        # Save message ID for future reference
-        context.user_data["profile_message_id"] = query.message.message_id
-        
-        keyboard = [
-            [InlineKeyboardButton("👨👩 Изменить пол", callback_data="edit_gender")],
-            [InlineKeyboardButton("✏️ Изменить возраст", callback_data="edit_age")],
-            [InlineKeyboardButton("📸 Загрузить аватар", callback_data="upload_avatar")],
-            [InlineKeyboardButton("🔙 Назад к профилю", callback_data="profile")]
-        ]
-        
-        await query.edit_message_text(
-            text="*Редактирование профиля*\n\nВыберите, что хотите изменить:",
-            reply_markup=InlineKeyboardMarkup(keyboard),
-            parse_mode="Markdown"
-        )
-        return EDIT_PROFILE
-        
-    elif query.data == "edit_gender":
-        keyboard = [
-            [InlineKeyboardButton("👨 Мужской", callback_data="gender_male")],
-            [InlineKeyboardButton("👩 Женский", callback_data="gender_female")],
-            [InlineKeyboardButton("🔙 Назад", callback_data="edit_profile")]
-        ]
-        
-        await query.edit_message_text(
-            text="*Выберите ваш пол:*",
-            reply_markup=InlineKeyboardMarkup(keyboard),
-            parse_mode="Markdown"
-        )
-        return EDIT_PROFILE
-        
-    elif query.data.startswith("gender_"):
-        gender = query.data.split("_")[1]
-        if user_id in user_data:
-            user_data[user_id]["gender"] = gender
-            save_user_data(user_data)
+            keyboard = [
+                [InlineKeyboardButton("👨👩 Изменить пол", callback_data="edit_gender")],
+                [InlineKeyboardButton("✏️ Изменить возраст", callback_data="edit_age")],
+                [InlineKeyboardButton("📸 Загрузить аватар", callback_data="upload_avatar")],
+                [InlineKeyboardButton("🔙 Назад к профилю", callback_data="profile")]
+            ]
             
-        keyboard = [
-            [InlineKeyboardButton("👨👩 Изменить пол", callback_data="edit_gender")],
-            [InlineKeyboardButton("✏️ Изменить возраст", callback_data="edit_age")],
-            [InlineKeyboardButton("📸 Загрузить аватар", callback_data="upload_avatar")],
-            [InlineKeyboardButton("🔙 Назад к профилю", callback_data="profile")]
-        ]
+            await query.edit_message_text(
+                text="*Редактирование профиля*\n\nВыберите, что хотите изменить:",
+                reply_markup=InlineKeyboardMarkup(keyboard),
+                parse_mode="Markdown"
+            )
+            return EDIT_PROFILE
+            
+        elif query.data == "edit_gender":
+            keyboard = [
+                [InlineKeyboardButton("👨 Мужской", callback_data="gender_male")],
+                [InlineKeyboardButton("👩 Женский", callback_data="gender_female")],
+                [InlineKeyboardButton("🔙 Назад", callback_data="edit_profile")]
+            ]
+            
+            await query.edit_message_text(
+                text="*Выберите ваш пол:*",
+                reply_markup=InlineKeyboardMarkup(keyboard),
+                parse_mode="Markdown"
+            )
+            return EDIT_PROFILE
+            
+        elif query.data.startswith("gender_"):
+            gender = query.data.split("_")[1]
+            if user_id in user_data:
+                user_data[user_id]["gender"] = gender
+                save_user_data(user_data)
+                
+            keyboard = [
+                [InlineKeyboardButton("👨👩 Изменить пол", callback_data="edit_gender")],
+                [InlineKeyboardButton("✏️ Изменить возраст", callback_data="edit_age")],
+                [InlineKeyboardButton("📸 Загрузить аватар", callback_data="upload_avatar")],
+                [InlineKeyboardButton("🔙 Назад к профилю", callback_data="profile")]
+            ]
+            
+            await query.edit_message_text(
+                text=f"✅ *Пол успешно обновлен!*\n\n"
+                     f"Ваш текущий пол: {'👨 Мужской' if gender == 'male' else '👩 Женский'}\n\n"
+                     f"*Редактирование профиля*\n\n"
+                     f"Выберите, что хотите изменить:",
+                reply_markup=InlineKeyboardMarkup(keyboard),
+                parse_mode="Markdown"
+            )
+            return EDIT_PROFILE
         
-        await query.edit_message_text(
-            text=f"✅ *Пол успешно обновлен!*\n\n"
-                 f"Ваш текущий пол: {'👨 Мужской' if gender == 'male' else '👩 Женский'}\n\n"
-                 f"*Редактирование профиля*\n\n"
-                 f"Выберите, что хотите изменить:",
-            reply_markup=InlineKeyboardMarkup(keyboard),
-            parse_mode="Markdown"
-        )
-        return EDIT_PROFILE
-    
-    elif query.data == "edit_age":
-        await query.edit_message_text(
-            text="*Введите ваш возраст:*\n\n"
-                 "Отправьте число от 13 до 100.",
-            parse_mode="Markdown"
-        )
-        context.user_data["edit_field"] = "age"
-        return EDIT_PROFILE
-    
-    elif query.data == "upload_avatar":
-        await query.edit_message_text(
-            text="*Загрузка аватара*\n\n"
-                 "Отправьте фотографию, которую хотите использовать как аватар.\n\n"
-                 "Для отмены нажмите /cancel",
-            parse_mode="Markdown"
-        )
-        context.user_data["uploading_avatar"] = True
-        return PROFILE
-    
-    elif query.data == "about":
-        # Show information about the bot
-        about_text = (
-            "*DOX Анонимный Чат* 🎭\n\n"
-            "Бот для анонимного общения с незнакомцами.\n\n"
-            "✨ *Особенности:*\n"
-            "• Полная анонимность собеседников\n"
-            "• Поиск по интересам\n"
-            "• Групповые чаты до 10 человек\n"
-            "• Персональные профили\n"
-            "• Рейтинговая система\n"
-            "• Система достижений\n\n"
-            "📱 *Версия:* 1.0\n"
-            "👨‍💻 *Разработчик:* @YourUsername\n\n"
-            "Спасибо, что пользуетесь нашим ботом! 🙏"
-        )
+        elif query.data == "edit_age":
+            await query.edit_message_text(
+                text="*Введите ваш возраст:*\n\n"
+                     "Отправьте число от 13 до 100.",
+                parse_mode="Markdown"
+            )
+            context.user_data["edit_field"] = "age"
+            return EDIT_PROFILE
         
-        await query.edit_message_text(
-            about_text,
-            reply_markup=InlineKeyboardMarkup([
-                [InlineKeyboardButton("⬅️ Назад", callback_data="back_to_menu")]
-            ]),
-            parse_mode="Markdown"
-        )
+        elif query.data == "upload_avatar":
+            await query.edit_message_text(
+                text="*Загрузка аватара*\n\n"
+                     "Отправьте фотографию, которую хотите использовать как аватар.\n\n"
+                     "Для отмены нажмите /cancel",
+                parse_mode="Markdown"
+            )
+            context.user_data["uploading_avatar"] = True
+            return PROFILE
+        
+        elif query.data == "about":
+            # Show information about the bot
+            about_text = (
+                "*DOX Анонимный Чат* 🎭\n\n"
+                "Бот для анонимного общения с незнакомцами.\n\n"
+                "✨ *Особенности:*\n"
+                "• Полная анонимность собеседников\n"
+                "• Поиск по интересам\n"
+                "• Групповые чаты до 10 человек\n"
+                "• Персональные профили\n"
+                "• Рейтинговая система\n"
+                "• Система достижений\n\n"
+                "📱 *Версия:* 1.0\n"
+                "👨‍💻 *Разработчик:* @YourUsername\n\n"
+                "Спасибо, что пользуетесь нашим ботом! 🙏"
+            )
+            
+            await query.edit_message_text(
+                about_text,
+                reply_markup=InlineKeyboardMarkup([
+                    [InlineKeyboardButton("⬅️ Назад", callback_data="back_to_menu")]
+                ]),
+                parse_mode="Markdown"
+            )
+            return START
+            
+        elif query.data == "show_stats":
+            # Show detailed statistics
+            user_info = user_data.get(user_id, {})
+            chat_count = user_info.get("chat_count", 0)
+            total_messages = user_info.get("messages_sent", 0)
+            chat_time = user_info.get("chat_time", 0)
+            rating = user_info.get("rating", 0)
+            rating_count = user_info.get("rating_count", 0)
+            
+            # Calculate additional stats
+            avg_messages = round(total_messages / max(chat_count, 1), 1)
+            total_hours = round(chat_time / 3600, 1)
+            first_chat_date = user_info.get("first_chat_date", "Нет данных")
+            
+            stats_text = (
+                "📊 *Подробная статистика*\n\n"
+                f"👥 *Чаты:*\n"
+                f"• Всего чатов: {chat_count}\n"
+                f"• Первый чат: {first_chat_date}\n"
+                f"• Средняя длительность: {round(chat_time / max(chat_count * 60, 1), 1)} мин.\n\n"
+                f"💬 *Сообщения:*\n"
+                f"• Всего отправлено: {total_messages}\n"
+                f"• Среднее в чате: {avg_messages}\n\n"
+                f"⏱ *Время:*\n"
+                f"• Общее время в чатах: {total_hours} ч.\n\n"
+                f"⭐ *Рейтинг:*\n"
+                f"• Средний рейтинг: {rating:.1f}/5\n"
+                f"• Количество оценок: {rating_count}\n"
+            )
+            
+            await query.edit_message_text(
+                stats_text,
+                reply_markup=InlineKeyboardMarkup([
+                    [InlineKeyboardButton("⬅️ Назад к профилю", callback_data="profile")]
+                ]),
+                parse_mode="Markdown"
+            )
+            return PROFILE
+        
         return START
-        
-    elif query.data == "show_stats":
-        # Show detailed statistics
-        user_info = user_data.get(user_id, {})
-        chat_count = user_info.get("chat_count", 0)
-        total_messages = user_info.get("messages_sent", 0)
-        chat_time = user_info.get("chat_time", 0)
-        rating = user_info.get("rating", 0)
-        rating_count = user_info.get("rating_count", 0)
-        
-        # Calculate additional stats
-        avg_messages = round(total_messages / max(chat_count, 1), 1)
-        total_hours = round(chat_time / 3600, 1)
-        first_chat_date = user_info.get("first_chat_date", "Нет данных")
-        
-        stats_text = (
-            "📊 *Подробная статистика*\n\n"
-            f"👥 *Чаты:*\n"
-            f"• Всего чатов: {chat_count}\n"
-            f"• Первый чат: {first_chat_date}\n"
-            f"• Средняя длительность: {round(chat_time / max(chat_count * 60, 1), 1)} мин.\n\n"
-            f"💬 *Сообщения:*\n"
-            f"• Всего отправлено: {total_messages}\n"
-            f"• Среднее в чате: {avg_messages}\n\n"
-            f"⏱ *Время:*\n"
-            f"• Общее время в чатах: {total_hours} ч.\n\n"
-            f"⭐ *Рейтинг:*\n"
-            f"• Средний рейтинг: {rating:.1f}/5\n"
-            f"• Количество оценок: {rating_count}\n"
-        )
-        
-        await query.edit_message_text(
-            stats_text,
-            reply_markup=InlineKeyboardMarkup([
-                [InlineKeyboardButton("⬅️ Назад к профилю", callback_data="profile")]
-            ]),
-            parse_mode="Markdown"
-        )
-        return PROFILE
-    
-    return START
+    except Exception as e:
+        logger.error(f"Unhandled error in button_handler: {e}", exc_info=True)
+        try:
+            # Отправляем пользователю сообщение об ошибке и возвращаем его в главное меню
+            keyboard = [
+                [
+                    InlineKeyboardButton("👤 Профиль", callback_data="profile"),
+                    InlineKeyboardButton("🔍 Найти собеседника", callback_data="find_chat")
+                ],
+                [InlineKeyboardButton("👥 Групповой чат", callback_data="group_find")],
+                [InlineKeyboardButton("ℹ️ Помощь", callback_data="help")]
+            ]
+            await context.bot.send_message(
+                chat_id=update.effective_chat.id,
+                text="Произошла ошибка при обработке запроса. Вот основное меню:",
+                reply_markup=InlineKeyboardMarkup(keyboard)
+            )
+        except Exception:
+            logger.error("Failed to send error message", exc_info=True)
+        return START
 
 async def show_profile(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Show user profile."""
-    query = update.callback_query
-    user_id = str(query.from_user.id)
-    
-    # Save message ID for future reference
-    context.user_data["profile_message_id"] = query.message.message_id
-    
-    user_info = user_data.get(user_id, {})
-    gender = "👨 Мужской" if user_info.get("gender") == "male" else "👩 Женский" if user_info.get("gender") == "female" else "❓ Не указан"
-    age = user_info.get("age", "❓ Не указан")
-    
-    # Get chat statistics
-    chat_count = user_info.get("chat_count", 0)
-    total_messages = user_info.get("total_messages", 0)
-    avg_chat_duration = user_info.get("avg_chat_duration", 0)
-    achievements = user_info.get("achievements", [])
-    
-    # Calculate average chat duration in minutes
-    avg_duration_min = int(avg_chat_duration / 60) if avg_chat_duration else 0
-    
-    # Format interests
-    interests = user_info.get("interests", [])
-    interests_text = ""
-    if "flirt" in interests:
-        interests_text += "• 💘 Флирт\n"
-    if "chat" in interests:
-        interests_text += "• 💬 Общение\n"
-    if not interests_text:
-        interests_text = "❓ Не указаны"
-    
-    # Calculate rating and trend
-    rating = user_info.get("rating", 0)
-    rating_count = user_info.get("rating_count", 0)
-    prev_rating = user_info.get("prev_rating", 0)
-    rating_trend = "📈" if rating > prev_rating else "📉" if rating < prev_rating else "➡️"
-    rating_stars = "⭐" * int(rating) + "☆" * (5 - int(rating))
-    
-    # Format achievements
-    achievements_text = ""
-    if achievements:
-        for achievement_id in achievements:
-            achievement = ACHIEVEMENTS.get(achievement_id)
-            if achievement:
-                achievements_text += f"• {achievement['name']}\n"
-    else:
-        achievements_text = "Пока нет достижений"
-    
-    # Create profile completion percentage
-    completed_fields = 0
-    total_fields = 3
-    if user_info.get("gender"): completed_fields += 1
-    if user_info.get("age"): completed_fields += 1
-    if interests: completed_fields += 1
-    completion_percentage = int(completed_fields / total_fields * 100)
-    completion_bar = "▓" * (completion_percentage // 10) + "░" * (10 - completion_percentage // 10)
-    
-    # Build profile text
-    profile_text = (
-        f"👤 *Ваш профиль*\n\n"
-        f"*Заполнено:* {completion_percentage}% {completion_bar}\n\n"
-        f"━━━━━━━━━━━━━━━━━━━━━\n"
-        f"📋 *Основная информация:*\n"
-        f"• Пол: {gender}\n"
-        f"• Возраст: {age}\n\n"
-        f"🔖 *Интересы:*\n{interests_text}\n"
-        f"━━━━━━━━━━━━━━━━━━━━━\n"
-        f"📊 *Ваша статистика:*\n"
-        f"• Всего чатов: {chat_count}\n"
-        f"• Сообщений: {total_messages}\n"
-        f"• Средняя длительность: {avg_duration_min} мин.\n"
-        f"• Рейтинг: {rating_stars} {rating_trend} ({rating:.1f}/5)\n"
-        f"  На основе {rating_count} оценок\n"
-        f"━━━━━━━━━━━━━━━━━━━━━\n"
-        f"🏆 *Достижения:*\n{achievements_text}"
-    )
-    
-    # Create keyboard with better organization
-    keyboard = [
-        [
-            InlineKeyboardButton("✏️ Редактировать профиль", callback_data="edit_profile"),
-            InlineKeyboardButton("🔄 Интересы", callback_data="interest_edit")
-        ],
-        [
-            InlineKeyboardButton("📈 Статистика", callback_data="show_stats"),
-            InlineKeyboardButton("⬅️ Вернуться в меню", callback_data="back_to_start")
+    try:
+        query = update.callback_query
+        user_id = str(query.from_user.id)
+        
+        # Save message ID for future reference
+        context.user_data["profile_message_id"] = query.message.message_id
+        
+        user_info = user_data.get(user_id, {})
+        gender = "👨 Мужской" if user_info.get("gender") == "male" else "👩 Женский" if user_info.get("gender") == "female" else "❓ Не указан"
+        age = user_info.get("age", "❓ Не указан")
+        
+        # Get chat statistics
+        chat_count = user_info.get("chat_count", 0)
+        total_messages = user_info.get("total_messages", 0)
+        avg_chat_duration = user_info.get("avg_chat_duration", 0)
+        achievements = user_info.get("achievements", [])
+        
+        # Calculate average chat duration in minutes
+        avg_duration_min = int(avg_chat_duration / 60) if avg_chat_duration else 0
+        
+        # Format interests
+        interests = user_info.get("interests", [])
+        interests_text = ""
+        if "flirt" in interests:
+            interests_text += "• 💘 Флирт\n"
+        if "chat" in interests:
+            interests_text += "• 💬 Общение\n"
+        if not interests_text:
+            interests_text = "❓ Не указаны"
+        
+        # Calculate rating and trend
+        rating = user_info.get("rating", 0)
+        rating_count = user_info.get("rating_count", 0)
+        prev_rating = user_info.get("prev_rating", 0)
+        rating_trend = "📈" if rating > prev_rating else "📉" if rating < prev_rating else "➡️"
+        rating_stars = "⭐" * int(rating) + "☆" * (5 - int(rating))
+        
+        # Format achievements
+        achievements_text = ""
+        if achievements:
+            for achievement_id in achievements:
+                achievement = ACHIEVEMENTS.get(achievement_id)
+                if achievement:
+                    achievements_text += f"• {achievement['name']}\n"
+        else:
+            achievements_text = "Пока нет достижений"
+        
+        # Create profile completion percentage
+        completed_fields = 0
+        total_fields = 3
+        
+        if user_info.get("gender"):
+            completed_fields += 1
+        if user_info.get("age"):
+            completed_fields += 1
+        if user_info.get("avatar_path"):
+            completed_fields += 1
+        
+        completion_percentage = int((completed_fields / total_fields) * 100)
+        completion_bar = "█" * (completion_percentage // 10) + "░" * (10 - (completion_percentage // 10))
+        
+        # Build profile text
+        profile_text = (
+            f"👤 *Ваш профиль*\n\n"
+            f"📋 *Основная информация:*\n"
+            f"• Пол: {gender}\n"
+            f"• Возраст: {age}\n"
+            f"• Интересы:\n{interests_text}\n\n"
+            
+            f"📊 *Статистика:*\n"
+            f"• Количество чатов: {chat_count}\n"
+        )
+        
+        if rating and rating_count:
+            profile_text += f"• Рейтинг: {rating_stars} {rating:.1f}/5 {rating_trend}\n"
+            profile_text += f"• Количество оценок: {rating_count}\n"
+        
+        if total_messages:
+            profile_text += f"• Всего сообщений: {total_messages}\n"
+        
+        if avg_duration_min:
+            profile_text += f"• Средняя длительность чата: {avg_duration_min} мин.\n"
+        
+        profile_text += f"\n🔄 *Заполнение профиля:* {completion_percentage}%\n{completion_bar}\n"
+        
+        if achievements_text:
+            profile_text += f"\n🏆 *Достижения:*\n{achievements_text}\n"
+        
+        # Define keyboard for profile
+        keyboard = [
+            [
+                InlineKeyboardButton("✏️ Редактировать профиль", callback_data="edit_profile"),
+            ],
+            [
+                InlineKeyboardButton("⬅️ Назад в меню", callback_data="back_to_menu")
+            ]
         ]
-    ]
-    
-    # Send avatar if exists
-    avatar_path = f"avatars/{user_id}.jpg"
-    if os.path.exists(avatar_path):
+        
+        # Check if user has avatar
+        avatar_path = user_info.get("avatar_path")
+        if avatar_path and os.path.exists(avatar_path):
+            try:
+                with open(avatar_path, "rb") as photo:
+                    # Send profile with avatar
+                    await query.message.reply_photo(
+                        photo=photo,
+                        caption=profile_text,
+                        reply_markup=InlineKeyboardMarkup(keyboard),
+                        parse_mode="Markdown"
+                    )
+                return PROFILE
+            except Exception as e:
+                logger.error(f"Error sending avatar: {e}", exc_info=True)
+                # Fall back to text-only profile if avatar fails
+        
+        # Send profile without avatar
         try:
-            with open(avatar_path, "rb") as photo:
-                await context.bot.send_photo(
-                    chat_id=query.message.chat_id,
-                    photo=photo,
-                    caption=profile_text,
-                    reply_markup=InlineKeyboardMarkup(keyboard),
-                    parse_mode="Markdown"
-                )
-            return PROFILE
+            await query.edit_message_text(
+                text=profile_text,
+                reply_markup=InlineKeyboardMarkup(keyboard),
+                parse_mode="Markdown"
+            )
         except Exception as e:
-            logger.error(f"Error sending avatar: {e}")
-    
-    # Send profile without avatar
-    await query.edit_message_text(
-        text=profile_text,
-        reply_markup=InlineKeyboardMarkup(keyboard),
-        parse_mode="Markdown"
-    )
-    
-    return PROFILE
+            logger.error(f"Error editing profile message: {e}", exc_info=True)
+            # Если не удалось отредактировать, отправляем новое сообщение
+            sent_message = await context.bot.send_message(
+                chat_id=query.message.chat_id,
+                text=profile_text,
+                reply_markup=InlineKeyboardMarkup(keyboard),
+                parse_mode="Markdown"
+            )
+            context.user_data["profile_message_id"] = sent_message.message_id
+        
+        return PROFILE
+        
+    except Exception as e:
+        logger.error(f"Error in show_profile: {e}", exc_info=True)
+        try:
+            # В случае ошибки отправляем сообщение и возвращаем пользователя в главное меню
+            keyboard = [
+                [
+                    InlineKeyboardButton("👤 Профиль", callback_data="profile"),
+                    InlineKeyboardButton("🔍 Найти собеседника", callback_data="find_chat")
+                ],
+                [InlineKeyboardButton("👥 Групповой чат", callback_data="group_find")],
+                [InlineKeyboardButton("ℹ️ Помощь", callback_data="help")]
+            ]
+            
+            if update.callback_query:
+                await update.callback_query.message.reply_text(
+                    "Произошла ошибка при загрузке профиля. Вот основное меню:",
+                    reply_markup=InlineKeyboardMarkup(keyboard)
+                )
+            else:
+                await context.bot.send_message(
+                    chat_id=update.effective_chat.id,
+                    text="Произошла ошибка при загрузке профиля. Вот основное меню:",
+                    reply_markup=InlineKeyboardMarkup(keyboard)
+                )
+                
+        except Exception:
+            logger.error("Failed to send error message for profile", exc_info=True)
+            
+        return START
 
 async def handle_avatar_upload(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Handle avatar photo upload."""
