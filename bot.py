@@ -580,11 +580,13 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
                     await update.message.reply_text(
                         "⚠️ Пожалуйста, введите корректный возраст (от 13 до 100 лет)."
                     )
+                
                 return EDIT_PROFILE
         except ValueError:
             # Not a valid number
             profile_message_id = context.user_data.get("profile_message_id")
             profile_chat_id = context.user_data.get("profile_chat_id")
+            
             if profile_message_id and profile_chat_id:
                 try:
                     await context.bot.edit_message_text(
