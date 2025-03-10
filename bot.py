@@ -1679,19 +1679,27 @@ async def main() -> None:
                 allowed_updates=Update.ALL_TYPES
             )
             # Start webhook server
-            application.run_webhook(
+            await application.initialize()
+            await application.start()
+            await application.run_webhook(
                 listen="0.0.0.0",
                 port=PORT,
                 url_path="webhook"
             )
         else:
             logger.info("Starting polling...")
+            await application.initialize()
+            await application.start()
             await application.run_polling(allowed_updates=Update.ALL_TYPES, drop_pending_updates=True)
         
         logger.info("Bot stopped")
     except Exception as e:
         logger.critical("Fatal error starting bot: %s", str(e), exc_info=True)
         sys.exit(1)
+    finally:
+        # Ensure proper shutdown
+        await application.stop()
+        await application.shutdown()
 
 async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Handle errors in the dispatcher."""
