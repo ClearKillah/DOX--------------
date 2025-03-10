@@ -1546,6 +1546,28 @@ async def end_chat_session(user_id: str, partner_id: str, context: ContextTypes.
     if partner_id in active_chats:
         del active_chats[partner_id]
     
+    # Delete chat messages for both users
+    try:
+        # Get the last 100 messages for both users
+        user_messages = await context.bot.get_chat_history(chat_id=int(user_id), limit=100)
+        partner_messages = await context.bot.get_chat_history(chat_id=int(partner_id), limit=100)
+        
+        # Delete messages for the user
+        for message in user_messages:
+            try:
+                await message.delete()
+            except Exception as e:
+                logger.error(f"Error deleting message for user {user_id}: {e}")
+        
+        # Delete messages for the partner
+        for message in partner_messages:
+            try:
+                await message.delete()
+            except Exception as e:
+                logger.error(f"Error deleting message for partner {partner_id}: {e}")
+    except Exception as e:
+        logger.error(f"Error deleting chat messages: {e}")
+    
     # Notify partner
     try:
         await context.bot.send_message(
@@ -1654,11 +1676,16 @@ def main() -> None:
         # Start the Bot with webhook if on Railway, otherwise use polling
         if 'RAILWAY_STATIC_URL' in os.environ:
             logger.info(f"Starting webhook on {RAILWAY_STATIC_URL}")
+            # Set webhook
+            await application.bot.set_webhook(
+                url=f"https://{RAILWAY_STATIC_URL}/webhook",
+                allowed_updates=Update.ALL_TYPES
+            )
+            # Start webhook server
             application.run_webhook(
                 listen="0.0.0.0",
                 port=PORT,
-                url_path=token,
-                webhook_url=f"https://{RAILWAY_STATIC_URL}/{token}"
+                url_path="webhook"
             )
         else:
             logger.info("Starting polling...")
