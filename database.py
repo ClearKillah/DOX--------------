@@ -6,7 +6,8 @@ from typing import Dict, Any, Optional
 logger = logging.getLogger(__name__)
 
 # User data file
-USER_DATA_FILE = "user_data.json"
+USER_DATA_DIR = os.environ.get("DATA_DIR", ".")  # Get data directory from env or use current dir
+USER_DATA_FILE = os.path.join(USER_DATA_DIR, "user_data.json")
 
 # In-memory database for Railway (since Railway doesn't provide persistent storage by default)
 user_data_cache = {}
@@ -38,11 +39,15 @@ def save_user_data(data: Dict[str, Any]) -> None:
     user_data_cache = data
     
     try:
+        # Make sure the directory exists
+        os.makedirs(os.path.dirname(USER_DATA_FILE), exist_ok=True)
+        
         with open(USER_DATA_FILE, "w", encoding="utf-8") as file:
             json.dump(data, file, ensure_ascii=False, indent=4)
         logger.info(f"Saved user data for {len(data)} users")
     except Exception as e:
         logger.error(f"Error saving user data: {e}")
+        logger.error(f"Will continue with in-memory data only")
 
 def get_user_data(user_id: str) -> Dict[str, Any]:
     """Get user data by user ID."""

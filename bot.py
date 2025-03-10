@@ -11,8 +11,12 @@ from typing import Dict, Any, List, Optional
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, ReplyKeyboardMarkup, KeyboardButton, InputFile
 from telegram.ext import Application, CommandHandler, CallbackQueryHandler, MessageHandler, filters, ContextTypes, ConversationHandler
 import telegram
+from dotenv import load_dotenv
 
 import database as db
+
+# Load environment variables from .env file if it exists
+load_dotenv()
 
 # Enable logging with more detailed level
 logging.basicConfig(
@@ -1597,9 +1601,9 @@ async def main() -> None:
     logger.info("Initializing database...")
     db.init_db()
     
-    # Create the Application
-    token = "8039344227:AAEDCP_902a3r52JIdM9REqUyPx-p2IVtxA"
-    logger.info(f"Using token: {token}")
+    # Get token from environment variable or use default for local development
+    token = os.environ.get("TELEGRAM_BOT_TOKEN", "8039344227:AAEDCP_902a3r52JIdM9REqUyPx-p2IVtxA")
+    logger.info(f"Using token: {token[:5]}...{token[-5:]}")  # Log only parts of token for security
     
     application = Application.builder().token(token).build()
     
