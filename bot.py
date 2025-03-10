@@ -1639,9 +1639,22 @@ async def main() -> None:
     
     # Start the bot
     logger.info("Starting polling...")
+    
+    # Упрощенный способ запуска без дублирования событийных циклов
     await application.initialize()
     await application.start()
-    await application.run_polling(allowed_updates=Update.ALL_TYPES, drop_pending_updates=True)
+    await application.updater.start_polling(allowed_updates=Update.ALL_TYPES, drop_pending_updates=True)
+    
+    # Держим приложение запущенным
+    try:
+        # Бесконечный цикл для поддержания работы приложения
+        while True:
+            await asyncio.sleep(3600)  # Спим час и продолжаем работу
+    except (KeyboardInterrupt, SystemExit):
+        # В случае прерывания корректно останавливаем приложение
+        logger.info("Bot stopping...")
+        await application.stop()
+        await application.updater.stop()
 
 if __name__ == "__main__":
     try:
