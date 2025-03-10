@@ -355,8 +355,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     elif query.data == "edit_gender":
         keyboard = [
             [InlineKeyboardButton("👨 Мужской", callback_data="gender_male")],
-            [InlineKeyboardButton("👩 Женский", callback_data="gender_female")],
-            [InlineKeyboardButton("🔙 Назад", callback_data="edit_profile")]
+            [InlineKeyboardButton("👩 Женский", callback_data="gender_female")]
         ]
         
         await query.edit_message_text(
@@ -372,18 +371,28 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
             user_data[user_id]["gender"] = gender
             save_user_data(user_data)
         
+        # Сразу возвращаемся к редактированию профиля без промежуточного сообщения
         keyboard = [
-            [InlineKeyboardButton("🔙 Назад", callback_data="edit_profile")]
+            [InlineKeyboardButton("👨👩 Изменить пол", callback_data="edit_gender")],
+            [InlineKeyboardButton("✏️ Изменить возраст", callback_data="edit_age")],
+            [InlineKeyboardButton("🖼 Загрузить аватар", callback_data="upload_avatar")],
+            [InlineKeyboardButton("🔙 Назад", callback_data="profile")]
         ]
         
         await query.edit_message_text(
-            text=f"✅ *Пол успешно изменен!*\n\nВаш пол: {'👨 Мужской' if gender == 'male' else '👩 Женский'}",
+            text=f"*Редактирование профиля*\n\n"
+                 f"✅ Пол успешно изменен на: {'👨 Мужской' if gender == 'male' else '👩 Женский'}\n\n"
+                 f"Выберите, что хотите изменить:",
             reply_markup=InlineKeyboardMarkup(keyboard),
             parse_mode="Markdown"
         )
         return EDIT_PROFILE
     
     elif query.data == "edit_age":
+        # Сохраняем ID сообщения для последующего редактирования
+        context.user_data["profile_message_id"] = query.message.message_id
+        context.user_data["profile_chat_id"] = query.message.chat_id
+        
         await query.edit_message_text(
             text="*Введите ваш возраст:*\n\n"
                  "Отправьте число от 13 до 100.",
@@ -393,6 +402,10 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         return EDIT_PROFILE
     
     elif query.data == "upload_avatar":
+        # Сохраняем ID сообщения для последующего редактирования
+        context.user_data["profile_message_id"] = query.message.message_id
+        context.user_data["profile_chat_id"] = query.message.chat_id
+        
         await query.edit_message_text(
             text="*Загрузка аватара*\n\n"
                  "Отправьте фотографию, которую хотите использовать как аватар.\n\n"
@@ -481,6 +494,12 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     
     # If user is editing profile
     if context.user_data.get("edit_field") == "age":
+        # Удаляем сообщение пользователя с возрастом
+        try:
+            await update.message.delete()
+        except Exception as e:
+            logger.error(f"Error deleting age message: {e}")
+        
         if update.message.text and update.message.text.isdigit():
             age = int(update.message.text)
             if 13 <= age <= 100:
@@ -488,20 +507,103 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
                     user_data[user_id]["age"] = age
                     save_user_data(user_data)
                 
+                # Редактируем исходное сообщение с настройками профиля
+                profile_message_id = context.user_data.get("profile_message_id")
+                profile_chat_id = context.user_data.get("profile_chat_id")
+                
+                if profile_message_id and profile_chat_id:
+                    keyboard = [
+                        [InlineKeyboardButton("👨👩 Изменить пол", callback_data="edit_gender")],
+                        [InlineKeyboardButton("✏️ Изменить возраст", callback_data="edit_age")],
+                        [InlineKeyboardButton("🖼 Загрузить аватар", callback_data="upload_avatar")],
+                        [InlineKeyboardButton("🔙 Назад", callback_data="profile")]
+                    ]
+                    
+                    try:
+                        await context.bot.edit_message_text(
+                            chat_id=profile_chat_id,
+                            message_id=profile_message_id,
+                            text=f"*Редактирование профиля*\n\n"
+                                 f"✅ Возраст успешно изменен на: {age}\n\n"
+                                 f"Выберите, что хотите изменить:",
+                            reply_markup=InlineKeyboardMarkup(keyboard),
+                            parse_mode="Markdown"
+                        )
+                    except Exception as e:
+                        logger.error(f"Error editing profile message: {e}")
+                        # Если не удалось отредактировать, отправляем новое сообщение
+                        await update.message.reply_text(
+                            text=f"*Редактирование профиля*\n\n"
+                                 f"✅ Возраст успешно изменен на: {age}\n\n"
+                                 f"Выберите, что хотите изменить:",
+                            reply_markup=InlineKeyboardMarkup(keyboard),
+                            parse_mode="Markdown"
+                        )
+                else:
+                    # Если ID сообщения не сохранен, отправляем новое сообщение
+                    await update.message.reply_text(
+                        text=f"*Редактирование профиля*\n\n"
+                             f"✅ Возраст успешно изменен на: {age}\n\n"
+                             f"Выберите, что хотите изменить:",
+                        reply_markup=InlineKeyboardMarkup(keyboard),
+                        parse_mode="Markdown"
+                    )
+                
                 # Clear edit field
                 context.user_data.pop("edit_field", None)
+                context.user_data.pop("profile_message_id", None)
+                context.user_data.pop("profile_chat_id", None)
                 
-                # Show profile
-                return await show_profile(update, context)
+                return EDIT_PROFILE
+            else:
+                # Отправляем сообщение об ошибке и редактируем исходное сообщение
+                profile_message_id = context.user_data.get("profile_message_id")
+                profile_chat_id = context.user_data.get("profile_chat_id")
+                
+                if profile_message_id and profile_chat_id:
+                    try:
+                        await context.bot.edit_message_text(
+                            chat_id=profile_chat_id,
+                            message_id=profile_message_id,
+                            text="*Введите ваш возраст:*\n\n"
+                                 "⚠️ Пожалуйста, введите корректный возраст (от 13 до 100 лет).",
+                            parse_mode="Markdown"
+                        )
+                    except Exception as e:
+                        logger.error(f"Error editing age message: {e}")
+                        await update.message.reply_text(
+                            "⚠️ Пожалуйста, введите корректный возраст (от 13 до 100 лет)."
+                        )
+                else:
+                    await update.message.reply_text(
+                        "⚠️ Пожалуйста, введите корректный возраст (от 13 до 100 лет)."
+                    )
+                
+                return EDIT_PROFILE
+        except Exception as e:
+            # Отправляем сообщение об ошибке и редактируем исходное сообщение
+            profile_message_id = context.user_data.get("profile_message_id")
+            profile_chat_id = context.user_data.get("profile_chat_id")
+            
+            if profile_message_id and profile_chat_id:
+                try:
+                    await context.bot.edit_message_text(
+                        chat_id=profile_chat_id,
+                        message_id=profile_message_id,
+                        text="*Введите ваш возраст:*\n\n"
+                             "⚠️ Пожалуйста, введите корректный возраст (от 13 до 100 лет).",
+                        parse_mode="Markdown"
+                    )
+                except Exception as e:
+                    logger.error(f"Error editing age message: {e}")
+                    await update.message.reply_text(
+                        "⚠️ Пожалуйста, введите корректный возраст (от 13 до 100 лет)."
+                    )
             else:
                 await update.message.reply_text(
                     "⚠️ Пожалуйста, введите корректный возраст (от 13 до 100 лет)."
                 )
-                return EDIT_PROFILE
-        else:
-            await update.message.reply_text(
-                "⚠️ Пожалуйста, введите корректный возраст (число от 13 до 100)."
-            )
+            
             return EDIT_PROFILE
     
     elif context.user_data.get("edit_field") == "avatar":
@@ -1362,42 +1464,6 @@ async def leave_group_chat(update: Update, context: ContextTypes.DEFAULT_TYPE, g
                     [InlineKeyboardButton("🔙 Назад", callback_data="group_chat")]
                 ])
             )
-    else:
-        # If user was the creator, assign a new creator
-        if group_info["creator"] == user_id:
-            group_info["creator"] = group_info["members"][0]
-        
-        # Notify user that they left
-        if update.callback_query:
-            await update.callback_query.edit_message_text(
-                text="✅ *Вы покинули группу*\n\n"
-                     "Вы больше не будете получать сообщения от участников этой группы.",
-                parse_mode="Markdown",
-                reply_markup=InlineKeyboardMarkup([
-                    [InlineKeyboardButton("🔙 Назад", callback_data="group_chat")]
-                ])
-            )
-        else:
-            await update.message.reply_text(
-                text="✅ *Вы покинули группу*\n\n"
-                     "Вы больше не будете получать сообщения от участников этой группы.",
-                parse_mode="Markdown",
-                reply_markup=InlineKeyboardMarkup([
-                    [InlineKeyboardButton("🔙 Назад", callback_data="group_chat")]
-                ])
-            )
-        
-        # Notify other members that someone left
-        for member_id in group_info["members"]:
-            try:
-                await context.bot.send_message(
-                    chat_id=int(member_id),
-                    text=f"👋 *Участник покинул группу*\n\n"
-                         f"В группе теперь {len(group_info['members'])} участников.",
-                    parse_mode="Markdown"
-                )
-            except Exception as e:
-                logger.error(f"Error notifying group member {member_id}: {e}")
     
     return START
 
