@@ -1617,7 +1617,7 @@ async def save_avatar(user_id: str, photo_file) -> str:
     
     return avatar_path
 
-def main() -> None:
+async def main() -> None:
     """Start the bot."""
     try:
         logger.info("Starting bot...")
@@ -1682,14 +1682,14 @@ def main() -> None:
                 allowed_updates=Update.ALL_TYPES
             )
             # Start webhook server
-            application.run_webhook(
+            await application.run_webhook(
                 listen="0.0.0.0",
                 port=PORT,
                 url_path="webhook"
             )
         else:
             logger.info("Starting polling...")
-            application.run_polling(allowed_updates=Update.ALL_TYPES, drop_pending_updates=True)
+            await application.run_polling(allowed_updates=Update.ALL_TYPES, drop_pending_updates=True)
         
         logger.info("Bot stopped")
     except Exception as e:
@@ -1707,4 +1707,4 @@ async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> N
         )
 
 if __name__ == "__main__":
-    main() 
+    asyncio.run(main()) 
