@@ -1094,6 +1094,7 @@ async def find_group_chat(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     for group_id, group_info in group_chats.items():
         if len(group_info.get("members", [])) < GROUP_MAX_MEMBERS and not group_info.get("private", False):
             available_groups.append((group_id, group_info))
+        )
     
     if available_groups:
         # Sort groups by number of members (descending)
@@ -1679,9 +1680,7 @@ async def main() -> None:
                 allowed_updates=Update.ALL_TYPES
             )
             # Start webhook server
-            await application.initialize()
-            await application.start()
-            await application.run_webhook(
+            application.run_webhook(
                 listen="0.0.0.0",
                 port=PORT,
                 url_path="webhook"
