@@ -608,6 +608,12 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     
     elif context.user_data.get("edit_field") == "avatar":
         if update.message.photo:
+            # Удаляем сообщение пользователя с фотографией
+            try:
+                await update.message.delete()
+            except Exception as e:
+                logger.error(f"Error deleting avatar message: {e}")
+            
             # Save avatar
             photo_file = await update.message.photo[-1].get_file()
             avatar_path = await save_avatar(user_id, photo_file)
@@ -616,19 +622,80 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
                 user_data[user_id]["avatar"] = avatar_path
                 save_user_data(user_data)
             
+            # Редактируем исходное сообщение с настройками профиля
+            profile_message_id = context.user_data.get("profile_message_id")
+            profile_chat_id = context.user_data.get("profile_chat_id")
+            
+            if profile_message_id and profile_chat_id:
+                keyboard = [
+                    [InlineKeyboardButton("👨👩 Изменить пол", callback_data="edit_gender")],
+                    [InlineKeyboardButton("✏️ Изменить возраст", callback_data="edit_age")],
+                    [InlineKeyboardButton("🖼 Загрузить аватар", callback_data="upload_avatar")],
+                    [InlineKeyboardButton("🔙 Назад", callback_data="profile")]
+                ]
+                
+                try:
+                    await context.bot.edit_message_text(
+                        chat_id=profile_chat_id,
+                        message_id=profile_message_id,
+                        text=f"*Редактирование профиля*\n\n"
+                             f"✅ Аватар успешно загружен!\n\n"
+                             f"Выберите, что хотите изменить:",
+                        reply_markup=InlineKeyboardMarkup(keyboard),
+                        parse_mode="Markdown"
+                    )
+                except Exception as e:
+                    logger.error(f"Error editing profile message: {e}")
+                    # Если не удалось отредактировать, отправляем новое сообщение
+                    await context.bot.send_message(
+                        chat_id=update.effective_chat.id,
+                        text=f"*Редактирование профиля*\n\n"
+                             f"✅ Аватар успешно загружен!\n\n"
+                             f"Выберите, что хотите изменить:",
+                        reply_markup=InlineKeyboardMarkup(keyboard),
+                        parse_mode="Markdown"
+                    )
+            else:
+                # Если ID сообщения не сохранен, отправляем новое сообщение
+                await context.bot.send_message(
+                    chat_id=update.effective_chat.id,
+                    text=f"*Редактирование профиля*\n\n"
+                         f"✅ Аватар успешно загружен!\n\n"
+                         f"Выберите, что хотите изменить:",
+                    reply_markup=InlineKeyboardMarkup(keyboard),
+                    parse_mode="Markdown"
+                )
+            
             # Clear edit field
             context.user_data.pop("edit_field", None)
+            context.user_data.pop("profile_message_id", None)
+            context.user_data.pop("profile_chat_id", None)
             
-            # Show profile
-            await update.message.reply_text(
-                "✅ *Аватар успешно загружен!*",
-                parse_mode="Markdown"
-            )
-            return await show_profile(update, context)
+            return EDIT_PROFILE
         else:
-            await update.message.reply_text(
-                "⚠️ Пожалуйста, отправьте фотографию."
-            )
+            # Отправляем сообщение об ошибке и редактируем исходное сообщение
+            profile_message_id = context.user_data.get("profile_message_id")
+            profile_chat_id = context.user_data.get("profile_chat_id")
+            
+            if profile_message_id and profile_chat_id:
+                try:
+                    await context.bot.edit_message_text(
+                        chat_id=profile_chat_id,
+                        message_id=profile_message_id,
+                        text="*Загрузка аватара*\n\n"
+                             "⚠️ Пожалуйста, отправьте фотографию.",
+                        parse_mode="Markdown"
+                    )
+                except Exception as e:
+                    logger.error(f"Error editing avatar message: {e}")
+                    await update.message.reply_text(
+                        "⚠️ Пожалуйста, отправьте фотографию."
+                    )
+            else:
+                await update.message.reply_text(
+                    "⚠️ Пожалуйста, отправьте фотографию."
+                )
+            
             return EDIT_PROFILE
     
     # If user is joining a group by code
@@ -1402,7 +1469,6 @@ async def leave_group_chat(update: Update, context: ContextTypes.DEFAULT_TYPE, g
                 reply_markup=InlineKeyboardMarkup([
                     [InlineKeyboardButton("🔙 Назад", callback_data="group_chat")]
                 ])
-            )
         else:
             await update.message.reply_text(
                 text="❌ *Группа не найдена*\n\n"
