@@ -157,11 +157,15 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
         save_user_data(user_data)
     
     # Send welcome message with main menu
-    await update.message.reply_text(
-        text=WELCOME_TEXT,
-        parse_mode="Markdown",
-        reply_markup=InlineKeyboardMarkup(MAIN_KEYBOARD)
-    )
+    try:
+        await update.message.reply_text(
+            text=WELCOME_TEXT,
+            parse_mode="Markdown",
+            reply_markup=InlineKeyboardMarkup(MAIN_KEYBOARD)
+        )
+        logger.info(f"Welcome message sent to user {user_id}")
+    except Exception as e:
+        logger.error(f"Error sending welcome message to user {user_id}: {e}")
     
     return START
 
@@ -317,17 +321,6 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
                     [InlineKeyboardButton("❌ Отменить поиск", callback_data="cancel_search")]
                 ])
             )
-            
-            # Add user to searching users
-            searching_users[user_id] = {
-                "start_time": time.time(),
-                "message_id": search_message.message_id,
-                "chat_id": query.message.chat_id
-            }
-            
-            # Start continuous search in background
-            asyncio.create_task(continuous_search(user_id, context))
-            return START
         else:
             # End chat completely
             await query.edit_message_text(
@@ -1631,6 +1624,10 @@ async def main() -> None:
             .token(token)
             .build()
         )
+        
+        # Add command handlers
+        application.add_handler(CommandHandler("start", start))
+        application.add_handler(CommandHandler("end", end_chat))
         
         # Add conversation handler
         conv_handler = ConversationHandler(
