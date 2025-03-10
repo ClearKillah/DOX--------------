@@ -148,8 +148,12 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
         user_id = str(update.effective_user.id)
         logger.info(f"Received /start command from user {user_id}")
         
+        # Log the current state of user_data
+        logger.info(f"Current user_data contains {len(user_data)} users")
+        
         # Initialize user data if not exists
         if user_id not in user_data:
+            logger.info(f"User {user_id} not found in user_data, initializing new entry")
             user_data[user_id] = {
                 "join_date": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
                 "chat_count": 0,
@@ -158,6 +162,8 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
             }
             save_user_data(user_data)
             logger.info(f"Initialized user data for user {user_id}")
+        else:
+            logger.info(f"User {user_id} found in user_data")
         
         # Send welcome message with main menu
         try:
@@ -1549,7 +1555,7 @@ async def leave_group_chat(update: Update, context: ContextTypes.DEFAULT_TYPE, g
     
     return START
 
-async def end_chat_session(user_id: str, partner_id: str, context: ContextTypes.DEFAULT_TYPE, reason: str = "user_choice") -> None:
+async def end_chat_session(user_id: str, partner_id: str, context: ContextTypes.DEFAULT_TYPE) -> None:
     """End a chat session between two users."""
     # Remove from active chats
     if user_id in active_chats:
@@ -1557,38 +1563,26 @@ async def end_chat_session(user_id: str, partner_id: str, context: ContextTypes.
     if partner_id in active_chats:
         del active_chats[partner_id]
     
-    # Delete chat messages for both users
-    try:
-        # Get the last 100 messages for both users
-        user_messages = await context.bot.get_chat_history(chat_id=int(user_id), limit=100)
-        partner_messages = await context.bot.get_chat_history(chat_id=int(partner_id), limit=100)
-        
-        # Delete messages for the user
-        for message in user_messages:
-            try:
-                await message.delete()
-            except Exception as e:
-                logger.error(f"Error deleting message for user {user_id}: {e}")
-        
-        # Delete messages for the partner
-        for message in partner_messages:
-            try:
-                await message.delete()
-            except Exception as e:
-                logger.error(f"Error deleting message for partner {partner_id}: {e}")
-    except Exception as e:
-        logger.error(f"Error deleting chat messages: {e}")
+    # Log the end of the chat
+    logger.info(f"Chat ended between {user_id} and {partner_id}")
     
-    # Notify partner
+    # Notify the partner that the chat has ended
     try:
         await context.bot.send_message(
-            chat_id=int(partner_id),
-            text=WELCOME_TEXT,
+            chat_id=partner_id,
+            text="❌ *Собеседник покинул чат*\n\nВы можете начать новый поиск.",
             parse_mode="Markdown",
-            reply_markup=InlineKeyboardMarkup(MAIN_KEYBOARD)
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton("🔍 Новый поиск", callback_data="find_chat")],
+                [InlineKeyboardButton("🔙 Главное меню", callback_data="back_to_menu")]
+            ])
         )
+        
+        # Clean up any pending messages or states
+        context.bot_data.pop(f'last_msg_{partner_id}', None)
+        context.bot_data.pop(f'last_msg_{user_id}', None)
     except Exception as e:
-        logger.error(f"Error notifying partner {partner_id} about chat end: {e}")
+        logger.error(f"Error notifying partner about chat end: {e}")
 
 async def end_chat(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """End the current chat."""
@@ -1632,6 +1626,11 @@ async def main() -> None:
     """Start the bot."""
     try:
         logger.info("Starting bot...")
+        
+        # Load user data first
+        global user_data
+        user_data = load_user_data()
+        logger.info(f"Loaded user data for {len(user_data)} users")
         
         # Initialize database
         logger.info("Initializing database...")
