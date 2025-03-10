@@ -1682,7 +1682,7 @@ async def main() -> None:
                 allowed_updates=Update.ALL_TYPES
             )
             # Start webhook server
-            await application.run_webhook(
+            application.run_webhook(
                 listen="0.0.0.0",
                 port=PORT,
                 url_path="webhook"
