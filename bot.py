@@ -1679,7 +1679,9 @@ async def main() -> None:
                 allowed_updates=Update.ALL_TYPES
             )
             # Start webhook server
-            application.run_webhook(
+            await application.initialize()
+            await application.start()
+            await application.run_webhook(
                 listen="0.0.0.0",
                 port=PORT,
                 url_path="webhook"
@@ -1704,4 +1706,11 @@ async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> N
         )
 
 if __name__ == "__main__":
-    asyncio.run(main()) 
+    import asyncio
+    try:
+        asyncio.run(main())
+    except KeyboardInterrupt:
+        logger.info("Bot stopped by user")
+    except Exception as e:
+        logger.critical("Fatal error: %s", str(e), exc_info=True)
+        sys.exit(1) 
