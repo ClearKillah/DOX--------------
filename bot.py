@@ -144,30 +144,48 @@ async def send_typing_notification(context: ContextTypes.DEFAULT_TYPE) -> None:
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Send welcome message when the command /start is issued."""
-    user_id = str(update.effective_user.id)
-    
-    # Initialize user data if not exists
-    if user_id not in user_data:
-        user_data[user_id] = {
-            "join_date": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-            "chat_count": 0,
-            "rating": 0,
-            "rating_count": 0
-        }
-        save_user_data(user_data)
-    
-    # Send welcome message with main menu
     try:
-        await update.message.reply_text(
-            text=WELCOME_TEXT,
-            parse_mode="Markdown",
-            reply_markup=InlineKeyboardMarkup(MAIN_KEYBOARD)
-        )
-        logger.info(f"Welcome message sent to user {user_id}")
+        user_id = str(update.effective_user.id)
+        logger.info(f"Received /start command from user {user_id}")
+        
+        # Initialize user data if not exists
+        if user_id not in user_data:
+            user_data[user_id] = {
+                "join_date": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                "chat_count": 0,
+                "rating": 0,
+                "rating_count": 0
+            }
+            save_user_data(user_data)
+            logger.info(f"Initialized user data for user {user_id}")
+        
+        # Send welcome message with main menu
+        try:
+            await update.message.reply_text(
+                text=WELCOME_TEXT,
+                parse_mode="Markdown",
+                reply_markup=InlineKeyboardMarkup(MAIN_KEYBOARD)
+            )
+            logger.info(f"Welcome message sent to user {user_id}")
+        except Exception as e:
+            logger.error(f"Error sending welcome message to user {user_id}: {e}")
+            # Try to send a simpler message if the formatted one fails
+            await update.message.reply_text(
+                text="Добро пожаловать в анонимный чат!",
+                reply_markup=InlineKeyboardMarkup(MAIN_KEYBOARD)
+            )
+        
+        return START
     except Exception as e:
-        logger.error(f"Error sending welcome message to user {user_id}: {e}")
-    
-    return START
+        logger.error(f"Error in start function: {e}", exc_info=True)
+        # Try to send an error message
+        try:
+            await update.message.reply_text(
+                text="Произошла ошибка при запуске бота. Пожалуйста, попробуйте еще раз."
+            )
+        except:
+            pass
+        return START
 
 async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Handle button presses."""
@@ -1614,6 +1632,11 @@ async def main() -> None:
     """Start the bot."""
     try:
         logger.info("Starting bot...")
+        
+        # Initialize database
+        logger.info("Initializing database...")
+        db.init_db()
+        
         # Create the Application
         token = "8039344227:AAEDCP_902a3r52JIdM9REqUyPx-p2IVtxA"
         logger.info("Using token: %s", token)
