@@ -92,4 +92,9 @@ def get_searching_users() -> Dict[str, Any]:
 def update_searching_users(searching_users: Dict[str, Any]) -> None:
     """Update searching users."""
     global searching_users_cache
-    searching_users_cache = searching_users 
+    searching_users_cache = searching_users
+
+def init_db() -> None:
+    """Initialize the database by loading user data."""
+    load_user_data()
+    logger.info("Database initialized successfully") 

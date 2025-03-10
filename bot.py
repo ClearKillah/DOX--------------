@@ -1001,7 +1001,7 @@ async def continuous_search(user_id: str, context: ContextTypes.DEFAULT_TYPE) ->
                                 text="❌ *Не удалось связаться с собеседником*\n\nПожалуйста, попробуйте найти другого собеседника.",
                                 parse_mode="Markdown",
                                 reply_markup=InlineKeyboardMarkup([
-                                    [InlineKeyboardButton("🔍 Найти нового собеседника", callback_data="find_chat")],
+                                    [InlineKeyboardButton("🔍 Новый поиск", callback_data="find_chat")],
                                     [InlineKeyboardButton("👤 Профиль", callback_data="profile")]
                                 ])
                             )
@@ -1112,66 +1112,34 @@ async def handle_avatar_upload(update: Update, context: ContextTypes.DEFAULT_TYP
 async def find_group_chat(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Find available group chats."""
     user_id = str(update.effective_user.id)
-    
-    # Get available groups
     available_groups = []
+    
     for group_id, group_info in group_chats.items():
         if len(group_info.get("members", [])) < GROUP_MAX_MEMBERS and not group_info.get("private", False):
             available_groups.append((group_id, group_info))
     
     if available_groups:
-        # Sort groups by number of members (descending)
-        available_groups.sort(key=lambda x: len(x[1].get("members", [])), reverse=True)
-        
-        # Create keyboard with groups
         keyboard = []
-        for group_id, group_info in available_groups[:5]:  # Show top 5 groups
-            members_count = len(group_info.get("members", []))
-            keyboard.append([
-                InlineKeyboardButton(
-                    f"{group_info.get('name')} ({members_count}/{GROUP_MAX_MEMBERS})",
-                    callback_data=f"join_group_{group_id}"
-                )
-            ])
+        for group_id, group_info in available_groups:
+            member_count = len(group_info.get("members", []))
+            keyboard.append([InlineKeyboardButton(
+                f"👥 Группа {group_id[:8]} ({member_count}/{GROUP_MAX_MEMBERS})",
+                callback_data=f"join_group_{group_id}"
+            )])
+        keyboard.append([InlineKeyboardButton("🔙 Назад", callback_data="back_to_main")])
         
-        keyboard.append([InlineKeyboardButton("🔙 Назад", callback_data="group_chat")])
-        
-        # Show available groups
-        if update.callback_query:
-            await update.callback_query.edit_message_text(
-                text="*Доступные группы:*\n\n"
-                     "Выберите группу, к которой хотите присоединиться:",
-                parse_mode="Markdown",
-                reply_markup=InlineKeyboardMarkup(keyboard)
-            )
-        else:
-            await update.message.reply_text(
-                text="*Доступные группы:*\n\n"
-                     "Выберите группу, к которой хотите присоединиться:",
-                parse_mode="Markdown",
-                reply_markup=InlineKeyboardMarkup(keyboard)
-            )
+        await update.callback_query.edit_message_text(
+            text="Доступные групповые чаты:",
+            reply_markup=InlineKeyboardMarkup(keyboard)
+        )
     else:
-        # No available groups
-        keyboard = [
-            [InlineKeyboardButton("🆕 Создать группу", callback_data="create_group")],
-            [InlineKeyboardButton("🔙 Назад", callback_data="group_chat")]
-        ]
-        
-        if update.callback_query:
-            await update.callback_query.edit_message_text(
-                text="*Нет доступных групп*\n\n"
-                     "В данный момент нет доступных групп. Вы можете создать свою группу.",
-                parse_mode="Markdown",
-                reply_markup=InlineKeyboardMarkup(keyboard)
-            )
-        else:
-            await update.message.reply_text(
-                text="*Нет доступных групп*\n\n"
-                     "В данный момент нет доступных групп. Вы можете создать свою группу.",
-                parse_mode="Markdown",
-                reply_markup=InlineKeyboardMarkup(keyboard)
-            )
+        await update.callback_query.edit_message_text(
+            text="Сейчас нет доступных групповых чатов. Создайте новый!",
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton("➕ Создать групповой чат", callback_data="create_group")],
+                [InlineKeyboardButton("🔙 Назад", callback_data="back_to_main")]
+            ])
+        )
     
     return START
 
@@ -1185,44 +1153,30 @@ async def create_group_chat(update: Update, context: ContextTypes.DEFAULT_TYPE) 
     # Generate invite code
     invite_code = ''.join(random.choices(string.ascii_uppercase + string.digits, k=6))
     
-    # Create group
-    group_chats[group_id] = {
-        "name": f"Группа {group_id[:4]}",
+    # Create group info
+    group_info = {
         "creator": user_id,
         "members": [user_id],
-        "created_at": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
         "invite_code": invite_code,
-        "private": False
+        "private": False,
+        "created_at": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     }
     
-    # Show group info
-    keyboard = [
-        [InlineKeyboardButton("❌ Покинуть группу", callback_data=f"leave_group_{group_id}")],
-        [InlineKeyboardButton("🔙 Назад", callback_data="group_chat")]
-    ]
+    # Add to group chats
+    group_chats[group_id] = group_info
     
-    if update.callback_query:
-        await update.callback_query.edit_message_text(
-            text=f"✅ *Группа создана!*\n\n"
-                 f"Название: {group_chats[group_id]['name']}\n"
-                 f"Код приглашения: `{invite_code}`\n"
-                 f"Участники: 1/{GROUP_MAX_MEMBERS}\n\n"
-                 f"Поделитесь кодом приглашения с друзьями, чтобы они могли присоединиться к вашей группе.",
-            parse_mode="Markdown",
-            reply_markup=InlineKeyboardMarkup(keyboard)
-        )
-    else:
-        await update.message.reply_text(
-            text=f"✅ *Группа создана!*\n\n"
-                 f"Название: {group_chats[group_id]['name']}\n"
-                 f"Код приглашения: `{invite_code}`\n"
-                 f"Участники: 1/{GROUP_MAX_MEMBERS}\n\n"
-                 f"Поделитесь кодом приглашения с друзьями, чтобы они могли присоединиться к вашей группе.",
-            parse_mode="Markdown",
-            reply_markup=InlineKeyboardMarkup(keyboard)
-        )
+    # Send success message with group info
+    await update.callback_query.edit_message_text(
+        text=f"✅ Групповой чат создан!\n\n"
+             f"ID группы: {group_id}\n"
+             f"Код приглашения: {invite_code}\n\n"
+             f"Поделитесь кодом приглашения с друзьями, чтобы они могли присоединиться к чату.",
+        reply_markup=InlineKeyboardMarkup([
+            [InlineKeyboardButton("🔙 Назад", callback_data="back_to_main")]
+        ])
+    )
     
-    return GROUP_CHATTING
+    return START
 
 async def join_group_chat(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Join a group chat by invite code."""
@@ -1622,107 +1576,6 @@ async def save_avatar(user_id: str, photo_file) -> str:
     
     return avatar_path
 
-async def main() -> None:
-    """Start the bot."""
-    try:
-        logger.info("Starting bot...")
-        
-        # Load user data first
-        global user_data
-        user_data = load_user_data()
-        logger.info(f"Loaded user data for {len(user_data)} users")
-        
-        # Initialize database
-        logger.info("Initializing database...")
-        db.init_db()
-        
-        # Create the Application
-        token = "8039344227:AAEDCP_902a3r52JIdM9REqUyPx-p2IVtxA"
-        logger.info("Using token: %s", token)
-        
-        # Build application
-        application = (
-            Application.builder()
-            .token(token)
-            .build()
-        )
-        
-        # Add command handlers
-        application.add_handler(CommandHandler("start", start))
-        application.add_handler(CommandHandler("end", end_chat))
-        
-        # Add conversation handler
-        conv_handler = ConversationHandler(
-            entry_points=[CommandHandler("start", start)],
-            states={
-                START: [
-                    CallbackQueryHandler(button_handler),
-                    MessageHandler(filters.VOICE, handle_message),  # Explicit handler for voice messages
-                    MessageHandler(filters.ALL & ~filters.COMMAND, handle_message)
-                ],
-                CHATTING: [
-                    CallbackQueryHandler(button_handler),
-                    CommandHandler("end", end_chat),
-                    MessageHandler(filters.VOICE, handle_message),  # Explicit handler for voice messages
-                    MessageHandler(filters.ALL & ~filters.COMMAND, handle_message)
-                ],
-                PROFILE: [
-                    CallbackQueryHandler(button_handler),
-                    MessageHandler(filters.ALL & ~filters.COMMAND, handle_message)
-                ],
-                EDIT_PROFILE: [
-                    CallbackQueryHandler(button_handler),
-                    MessageHandler(filters.ALL & ~filters.COMMAND, handle_message)
-                ],
-                GROUP_CHATTING: [
-                    CallbackQueryHandler(button_handler),
-                    MessageHandler(filters.VOICE, handle_group_message),  # Explicit handler for voice messages
-                    MessageHandler(filters.ALL & ~filters.COMMAND, handle_group_message)
-                ]
-            },
-            fallbacks=[CommandHandler("start", start)]
-        )
-        
-        application.add_handler(conv_handler)
-        
-        # Add error handler
-        application.add_error_handler(error_handler)
-        
-        # Get environment variables for Railway
-        PORT = int(os.environ.get('PORT', '8443'))
-        RAILWAY_STATIC_URL = os.environ.get('RAILWAY_STATIC_URL', 'dox-production.up.railway.app')
-        
-        # Start the Bot with webhook if on Railway, otherwise use polling
-        if 'RAILWAY_STATIC_URL' in os.environ:
-            logger.info(f"Starting webhook on {RAILWAY_STATIC_URL}")
-            # Set webhook
-            await application.bot.set_webhook(
-                url=f"https://{RAILWAY_STATIC_URL}/webhook",
-                allowed_updates=Update.ALL_TYPES
-            )
-            # Start webhook server
-            await application.initialize()
-            await application.start()
-            await application.run_webhook(
-                listen="0.0.0.0",
-                port=PORT,
-                url_path="webhook"
-            )
-        else:
-            logger.info("Starting polling...")
-            await application.initialize()
-            await application.start()
-            await application.run_polling(allowed_updates=Update.ALL_TYPES, drop_pending_updates=True)
-        
-        logger.info("Bot stopped")
-    except Exception as e:
-        logger.critical("Fatal error starting bot: %s", str(e), exc_info=True)
-        sys.exit(1)
-    finally:
-        # Ensure proper shutdown
-        await application.stop()
-        await application.shutdown()
-
 async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Handle errors in the dispatcher."""
     logger.error("Exception while handling an update:", exc_info=context.error)
@@ -1733,12 +1586,64 @@ async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> N
             "Произошла ошибка при обработке вашего запроса. Пожалуйста, попробуйте еще раз."
         )
 
+async def main() -> None:
+    """Start the bot."""
+    # Load user data first
+    global user_data
+    user_data = load_user_data()
+    logger.info(f"Loaded user data for {len(user_data)} users")
+    
+    # Initialize database
+    logger.info("Initializing database...")
+    db.init_db()
+    
+    # Create the Application
+    token = "8039344227:AAEDCP_902a3r52JIdM9REqUyPx-p2IVtxA"
+    logger.info(f"Using token: {token}")
+    
+    application = Application.builder().token(token).build()
+    
+    # Add handlers
+    conv_handler = ConversationHandler(
+        entry_points=[CommandHandler("start", start)],
+        states={
+            START: [
+                CallbackQueryHandler(find_chat, pattern="^find_chat$"),
+                CallbackQueryHandler(find_group_chat, pattern="^group_chat$"),
+                CallbackQueryHandler(show_profile, pattern="^profile$"),
+            ],
+            CHATTING: [
+                MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message),
+                CallbackQueryHandler(end_chat, pattern="^end_chat$"),
+            ],
+            PROFILE: [
+                CallbackQueryHandler(button_handler),
+            ],
+            EDIT_PROFILE: [
+                CallbackQueryHandler(button_handler),
+            ],
+            GROUP_CHATTING: [
+                MessageHandler(filters.TEXT & ~filters.COMMAND, handle_group_message),
+                CallbackQueryHandler(leave_group_chat, pattern="^leave_group$"),
+            ],
+        },
+        fallbacks=[CommandHandler("start", start)],
+    )
+    
+    application.add_handler(conv_handler)
+    application.add_error_handler(error_handler)
+    
+    # Start the bot
+    logger.info("Starting polling...")
+    await application.initialize()
+    await application.start()
+    await application.run_polling(allowed_updates=Update.ALL_TYPES, drop_pending_updates=True)
+
 if __name__ == "__main__":
-    import asyncio
     try:
         asyncio.run(main())
     except KeyboardInterrupt:
         logger.info("Bot stopped by user")
     except Exception as e:
-        logger.critical("Fatal error: %s", str(e), exc_info=True)
+        logger.critical(f"Fatal error: {e}", exc_info=True)
         sys.exit(1) 
