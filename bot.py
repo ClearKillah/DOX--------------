@@ -12,6 +12,7 @@ from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, ReplyKe
 from telegram.ext import Application, CommandHandler, CallbackQueryHandler, MessageHandler, filters, ContextTypes, ConversationHandler
 import telegram
 from dotenv import load_dotenv
+from PIL import Image, ImageDraw, ImageFont
 
 import database as db
 
@@ -29,11 +30,7 @@ logger = logging.getLogger(__name__)
 # Conversation states
 START, CHATTING, PROFILE, EDIT_PROFILE, GROUP_CHATTING = range(5)
 
-# User data file
-USER_DATA_FILE = "user_data.json"
-
 # Global variables
-user_data = {}
 active_chats = {}
 searching_users = {}
 group_chats = {}
@@ -55,80 +52,38 @@ MAIN_KEYBOARD = [
     [InlineKeyboardButton("ℹ️ Помощь", callback_data="help")]
 ]
 
-# Load user data from file
-def load_user_data():
-    if os.path.exists(USER_DATA_FILE):
-        try:
-            with open(USER_DATA_FILE, "r", encoding="utf-8") as file:
-                return json.load(file)
-        except Exception as e:
-            logger.error(f"Error loading user data: {e}")
-            return {}
-    return {}
-
-# Save user data to file
-def save_user_data(data):
-    try:
-        with open(USER_DATA_FILE, "w", encoding="utf-8") as file:
-            json.dump(data, file, ensure_ascii=False, indent=4)
-    except Exception as e:
-        logger.error(f"Error saving user data: {e}")
-
-# Load data on startup
-user_data = load_user_data()
-
-# Create avatar directory if it doesn't exist
-if not os.path.exists("avatars"):
-    os.makedirs("avatars")
-
-# Chat statistics class
-class ChatStats:
-    def __init__(self):
-        self.total_chats = 0
-        self.active_chats = 0
-        self.total_messages = 0
-        self.users_online = 0
-        self.last_update = datetime.datetime.now()
-
-# Initialize chat stats
-chat_stats = ChatStats()
-
 async def update_search_timer(context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Update search timer for all searching users."""
+    """Update the search timer for users."""
     try:
-        for user_id, search_info in list(searching_users.items()):
-            start_time = search_info.get("start_time", time.time())
-            chat_id = search_info.get("chat_id")
-            message_id = search_info.get("message_id")
-            
-            elapsed_time = int(time.time() - start_time)
-            minutes = elapsed_time // 60
-            seconds = elapsed_time % 60
-            time_str = f"{minutes:02d}:{seconds:02d}"
-            
-            try:
-                await context.bot.edit_message_text(
-                    chat_id=chat_id,
-                    message_id=message_id,
-                    text=f"🔍 *Поиск собеседника...*\n\n⏱ Время поиска: {time_str}",
-                    parse_mode="Markdown",
-                    reply_markup=InlineKeyboardMarkup([
-                        [InlineKeyboardButton("❌ Отменить поиск", callback_data="cancel_search")]
-                    ])
-                )
-            except Exception as e:
-                if "Message is not modified" in str(e):
-                    # Ignore this error, it's normal when the timer hasn't changed
-                    pass
-                else:
-                    logger.error(f"Error updating search time: {e}")
-                    # If we can't update the message, remove user from searching
-                    if user_id in searching_users:
-                        del searching_users[user_id]
-                    break
-            
-            # Wait before checking again
-            await asyncio.sleep(1)
+        global searching_users, active_chats
+        to_remove = []
+        current_time = time.time()
+        
+        for user_id, search_info in searching_users.items():
+            search_start = search_info.get("start_time", 0)
+            # If searching for more than 2 minutes
+            if current_time - search_start > 120:
+                to_remove.append(user_id)
+                
+                # Send timeout message
+                try:
+                    await context.bot.send_message(
+                        chat_id=int(user_id),
+                        text="⌛ Поиск собеседника завершен по таймауту. Попробуйте снова через некоторое время.",
+                        reply_markup=get_main_menu_keyboard()
+                    )
+                except Exception as e:
+                    logger.error(f"Error sending timeout message: {e}")
+        
+        # Remove users who timed out
+        for user_id in to_remove:
+            if user_id in searching_users:
+                del searching_users[user_id]
+        
+        # Update database with current state
+        db.update_searching_users(searching_users)
+        db.update_active_chats(active_chats)
+        
     except Exception as e:
         logger.error(f"Error in update_search_timer: {e}")
 
@@ -458,6 +413,9 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Handle user messages."""
+    if not update.message:
+        return CHATTING
+        
     user_id = str(update.effective_user.id)
     
     # Check if user is in active chat
@@ -477,7 +435,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
                 await context.bot.send_photo(
                     chat_id=int(partner_id),
                     photo=photo.file_id,
-                    caption=update.message.caption
+                    caption=update.message.caption or ""
                 )
             elif update.message.voice:
                 await context.bot.send_voice(
@@ -488,13 +446,35 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
                 await context.bot.send_video(
                     chat_id=int(partner_id),
                     video=update.message.video.file_id,
-                    caption=update.message.caption
+                    caption=update.message.caption or ""
                 )
             elif update.message.sticker:
                 await context.bot.send_sticker(
                     chat_id=int(partner_id),
                     sticker=update.message.sticker.file_id
                 )
+            elif update.message.animation:
+                await context.bot.send_animation(
+                    chat_id=int(partner_id),
+                    animation=update.message.animation.file_id,
+                    caption=update.message.caption or ""
+                )
+            elif update.message.document:
+                # Проверка размера документа, чтобы избежать превышения лимитов Telegram
+                if update.message.document.file_size <= 50 * 1024 * 1024:  # 50MB max
+                    await context.bot.send_document(
+                        chat_id=int(partner_id),
+                        document=update.message.document.file_id,
+                        caption=update.message.caption or ""
+                    )
+                else:
+                    # Отправляем уведомление, что файл слишком большой
+                    await update.message.reply_text("⚠️ Файл слишком большой для пересылки.")
+                    # И сообщаем партнеру
+                    await context.bot.send_message(
+                        chat_id=int(partner_id),
+                        text="[Собеседник пытался отправить файл, но он слишком большой]"
+                    )
             else:
                 await context.bot.send_message(
                     chat_id=int(partner_id),
@@ -502,10 +482,23 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
                 )
                 
             return CHATTING
+        except telegram.error.Unauthorized:
+            # Пользователь заблокировал бота
+            logger.info(f"User {partner_id} has blocked the bot")
+            await end_chat_session(user_id, partner_id, context)
+            await update.message.reply_text(
+                "❌ Собеседник заблокировал бота. Чат был завершен.",
+                reply_markup=InlineKeyboardMarkup(MAIN_KEYBOARD)
+            )
+            return START
         except Exception as e:
             logger.error(f"Error forwarding message: {e}")
             # If partner is unavailable, end chat
-            await end_chat(update, context)
+            await end_chat_session(user_id, partner_id, context)
+            await update.message.reply_text(
+                "❌ Ошибка при отправке сообщения. Чат был завершен.",
+                reply_markup=InlineKeyboardMarkup(MAIN_KEYBOARD)
+            )
             return START
     
     # Check if user is in a group chat
@@ -527,9 +520,9 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
                 age = int(update.message.text)
                 if 13 <= age <= 100:
                     # Update user data
-                    if user_id in user_data:
-                        user_data[user_id]["age"] = age
-                        save_user_data(user_data)
+                    user_data = db.get_user_data(user_id)
+                    user_data["age"] = age
+                    db.update_user_data(user_id, user_data)
                     
                     # Get profile message details
                     profile_message_id = context.user_data.get("profile_message_id")
@@ -815,6 +808,8 @@ async def find_chat(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
 async def continuous_search(user_id: str, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Continuously search for a chat partner."""
     try:
+        global active_chats, searching_users
+        
         # Get search info
         search_info = searching_users.get(user_id)
         if not search_info:
@@ -824,16 +819,34 @@ async def continuous_search(user_id: str, context: ContextTypes.DEFAULT_TYPE) ->
         message_id = search_info.get("message_id")
         start_time = search_info.get("start_time", time.time())
         
+        # Обновляем время поиска каждые 2 секунды
+        update_timer_task = asyncio.create_task(update_search_timer_for_user(user_id, context, chat_id, message_id, start_time))
+        
         # Search for a partner
         while user_id in searching_users:
-            # Find potential partners
+            # Find potential partners с учетом предпочтений
             potential_partners = []
+            user_data = db.get_user_data(user_id)
+            user_gender = user_data.get("gender")
+            
             for partner_id, partner_info in searching_users.items():
                 if partner_id != user_id:
-                    potential_partners.append(partner_id)
+                    # Проверяем совместимость по полу, если указан
+                    if user_gender:
+                        partner_data = db.get_user_data(partner_id)
+                        partner_gender = partner_data.get("gender")
+                        # Если у обоих указан пол, проверяем совместимость
+                        if partner_gender and user_gender != partner_gender:
+                            potential_partners.append(partner_id)
+                    else:
+                        # Если пол не указан, добавляем всех
+                        potential_partners.append(partner_id)
             
             # If found a partner
             if potential_partners:
+                # Отменяем задачу обновления таймера
+                update_timer_task.cancel()
+                
                 # Choose a random partner
                 partner_id = random.choice(potential_partners)
                 partner_info = searching_users[partner_id]
@@ -847,187 +860,88 @@ async def continuous_search(user_id: str, context: ContextTypes.DEFAULT_TYPE) ->
                 if partner_id in searching_users:
                     del searching_users[partner_id]
                 
+                # Синхронизируем с базой данных
+                db.update_searching_users(searching_users)
+                
                 # Add to active chats
                 active_chats[user_id] = partner_id
                 active_chats[partner_id] = user_id
                 
-                # Increment chat count for both users
-                if user_id in user_data:
-                    user_data[user_id]["chat_count"] = user_data[user_id].get("chat_count", 0) + 1
-                if partner_id in user_data:
-                    user_data[partner_id]["chat_count"] = user_data[partner_id].get("chat_count", 0) + 1
-                save_user_data(user_data)
-                
-                # Get partner info
-                partner_info = user_data.get(partner_id, {})
-                gender = "👨 Мужской" if partner_info.get("gender") == "male" else "👩 Женский" if partner_info.get("gender") == "female" else "Не указан"
-                age = partner_info.get("age", "Не указан")
-                
-                # Prepare partner info message
-                partner_text = f"*Информация о собеседнике:*\n\n"
-                if partner_info.get("gender"):
-                    partner_text += f"*Пол:* {gender}\n"
-                if partner_info.get("age"):
-                    partner_text += f"*Возраст:* {age}\n"
-                
-                interests = partner_info.get("interests", [])
-                if interests:
-                    interests_text = ""
-                    if "flirt" in interests:
-                        interests_text += "• 💘 Флирт\n"
-                    if "chat" in interests:
-                        interests_text += "• 💬 Общение\n"
-                    partner_text += f"*Интересы:*\n{interests_text}"
+                # Синхронизируем с базой данных
+                db.update_active_chats(active_chats)
                 
                 # Notify both users
-                keyboard = [
-                    [InlineKeyboardButton("⏭️ Пропустить", callback_data="skip_user")],
-                    [InlineKeyboardButton("❌ Завершить чат", callback_data="end_chat")]
-                ]
-                
                 try:
-                    # Send message to the user who initiated the search
+                    # Отправляем сообщение пользователю
                     await context.bot.edit_message_text(
                         chat_id=chat_id,
                         message_id=message_id,
-                        text=f"✅ *Собеседник найден!*\n\n{partner_text}\n\n*Начните общение прямо сейчас!*",
+                        text="✅ *Собеседник найден!*\n\nМожете начинать общение.",
                         parse_mode="Markdown",
-                        reply_markup=InlineKeyboardMarkup(keyboard)
+                        reply_markup=InlineKeyboardMarkup([
+                            [InlineKeyboardButton("❌ Завершить чат", callback_data="end_chat")]
+                        ])
                     )
                     
-                    # Pin the message
-                    try:
-                        await context.bot.pin_chat_message(
-                            chat_id=chat_id,
-                            message_id=message_id,
-                            disable_notification=True
-                        )
-                    except Exception as e:
-                        logger.error(f"Error pinning message for user {user_id}: {e}")
+                    # Отправляем сообщение партнеру
+                    await context.bot.edit_message_text(
+                        chat_id=partner_chat_id,
+                        message_id=partner_message_id,
+                        text="✅ *Собеседник найден!*\n\nМожете начинать общение.",
+                        parse_mode="Markdown",
+                        reply_markup=InlineKeyboardMarkup([
+                            [InlineKeyboardButton("❌ Завершить чат", callback_data="end_chat")]
+                        ])
+                    )
                 except Exception as e:
-                    logger.error(f"Error editing message for user {user_id}: {e}")
-                    # Attempt to send a new message instead of editing
-                    try:
-                        sent_message = await context.bot.send_message(
-                            chat_id=chat_id,
-                            text=f"✅ *Собеседник найден!*\n\n{partner_text}\n\n*Начните общение прямо сейчас!*",
-                            parse_mode="Markdown",
-                            reply_markup=InlineKeyboardMarkup(keyboard)
-                        )
-                        message_id = sent_message.message_id
-                        
-                        # Try to pin the new message
-                        try:
-                            await context.bot.pin_chat_message(
-                                chat_id=chat_id,
-                                message_id=message_id,
-                                disable_notification=True
-                            )
-                        except Exception as e:
-                            logger.error(f"Error pinning new message for user {user_id}: {e}")
-                    except Exception as e:
-                        logger.error(f"Failed to send fallback message to user {user_id}: {e}")
+                    logger.error(f"Error notifying users about match: {e}")
                 
-                # Get user info for partner
-                user_info = user_data.get(user_id, {})
-                user_text = f"*Информация о собеседнике:*\n\n"
-                if user_info.get("gender"):
-                    user_gender = "👨 Мужской" if user_info.get("gender") == "male" else "👩 Женский"
-                    user_text += f"*Пол:* {user_gender}\n"
-                if user_info.get("age"):
-                    user_text += f"*Возраст:* {user_info.get('age')}\n"
-                
-                user_interests = user_info.get("interests", [])
-                if user_interests:
-                    interests_text = ""
-                    if "flirt" in user_interests:
-                        interests_text += "• 💘 Флирт\n"
-                    if "chat" in user_interests:
-                        interests_text += "• 💬 Общение\n"
-                    user_text += f"*Интересы:*\n{interests_text}"
-                
-                # If partner was also searching, edit their search message
-                if partner_chat_id and partner_message_id:
-                    try:
-                        await context.bot.edit_message_text(
-                            chat_id=partner_chat_id,
-                            message_id=partner_message_id,
-                            text=f"✅ *Собеседник найден!*\n\n{user_text}\n\n*Начните общение прямо сейчас!*",
-                            parse_mode="Markdown",
-                            reply_markup=InlineKeyboardMarkup(keyboard)
-                        )
-                        
-                        # Pin message for partner
-                        try:
-                            await context.bot.pin_chat_message(
-                                chat_id=partner_chat_id,
-                                message_id=partner_message_id,
-                                disable_notification=True
-                            )
-                        except Exception as e:
-                            logger.error(f"Error pinning message for partner {partner_id}: {e}")
-                            
-                    except Exception as e:
-                        logger.error(f"Error updating partner's search message: {e}")
-                else:
-                    # Partner wasn't searching, send a new message
-                    try:
-                        partner_message = await context.bot.send_message(
-                            chat_id=int(partner_id),
-                            text=f"✅ *Собеседник найден!*\n\n{user_text}\n\n*Начните общение прямо сейчас!*",
-                            parse_mode="Markdown",
-                            reply_markup=InlineKeyboardMarkup(keyboard)
-                        )
-                        
-                        # Pin message for partner
-                        try:
-                            await context.bot.pin_chat_message(
-                                chat_id=int(partner_id),
-                                message_id=partner_message.message_id,
-                                disable_notification=True
-                            )
-                        except Exception as e:
-                            logger.error(f"Error pinning message for partner {partner_id}: {e}")
-                            
-                    except Exception as e:
-                        logger.error(f"Error sending message to partner {partner_id}: {e}")
-                        # If we can't send a message to the partner, clean up the chat
-                        if user_id in active_chats:
-                            del active_chats[user_id]
-                        if partner_id in active_chats:
-                            del active_chats[partner_id]
-                        
-                        # Notify the user that the partner is unavailable
-                        try:
-                            await context.bot.edit_message_text(
-                                chat_id=chat_id,
-                                message_id=message_id,
-                                text="❌ *Не удалось связаться с собеседником*\n\nПожалуйста, попробуйте найти другого собеседника.",
-                                parse_mode="Markdown",
-                                reply_markup=InlineKeyboardMarkup([
-                                    [InlineKeyboardButton("🔍 Новый поиск", callback_data="find_chat")],
-                                    [InlineKeyboardButton("👤 Профиль", callback_data="profile")]
-                                ])
-                            )
-                        except Exception as e:
-                            logger.error(f"Error notifying user about partner unavailability: {e}")
-                        
-                        # Continue searching
-                        continue
-                
-                # Update chat stats
-                chat_stats.total_chats += 1
-                chat_stats.active_chats += 1
-                
-                break
+                return
             
             # Wait before checking again
             await asyncio.sleep(1)
+        
+        # Если поиск был отменен, отменяем задачу обновления таймера
+        update_timer_task.cancel()
+        
     except Exception as e:
-        logger.error(f"Error in continuous_search: {e}", exc_info=True)
-        # Clean up if there was an error
-        if user_id in searching_users:
-            del searching_users[user_id]
+        logger.error(f"Error in continuous search: {e}")
+
+async def update_search_timer_for_user(user_id: str, context: ContextTypes.DEFAULT_TYPE, chat_id: int, message_id: int, start_time: float) -> None:
+    """Update search timer for a specific user."""
+    try:
+        while user_id in searching_users:
+            # Calculate elapsed time
+            elapsed_time = int(time.time() - start_time)
+            minutes = elapsed_time // 60
+            seconds = elapsed_time % 60
+            time_str = f"{minutes:02d}:{seconds:02d}"
+            
+            # Update message
+            try:
+                await context.bot.edit_message_text(
+                    chat_id=chat_id,
+                    message_id=message_id,
+                    text=f"🔍 *Поиск собеседника...*\n\n⏱ Время поиска: {time_str}",
+                    parse_mode="Markdown",
+                    reply_markup=InlineKeyboardMarkup([
+                        [InlineKeyboardButton("❌ Отменить поиск", callback_data="cancel_search")]
+                    ])
+                )
+            except telegram.error.BadRequest as e:
+                if "Message is not modified" in str(e):
+                    # Ignore this error, it's normal when the timer hasn't changed
+                    pass
+                else:
+                    logger.error(f"Error updating search time: {e}")
+            
+            # Wait before updating again
+            await asyncio.sleep(2)
+    except asyncio.CancelledError:
+        # Задача была отменена, это нормально
+        pass
+    except Exception as e:
+        logger.error(f"Error in update_search_timer_for_user: {e}")
 
 async def show_profile(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Show user profile."""
@@ -1130,6 +1044,7 @@ async def find_group_chat(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
                 f"👥 Группа {group_id[:8]} ({member_count}/{GROUP_MAX_MEMBERS})",
                 callback_data=f"join_group_{group_id}"
             )])
+        keyboard.append([InlineKeyboardButton("➕ Создать групповой чат", callback_data="create_group")])
         keyboard.append([InlineKeyboardButton("🔙 Назад", callback_data="back_to_main")])
         
         await update.callback_query.edit_message_text(
@@ -1515,11 +1430,29 @@ async def leave_group_chat(update: Update, context: ContextTypes.DEFAULT_TYPE, g
 
 async def end_chat_session(user_id: str, partner_id: str, context: ContextTypes.DEFAULT_TYPE) -> None:
     """End a chat session between two users."""
+    global active_chats
+    
     # Remove from active chats
     if user_id in active_chats:
         del active_chats[user_id]
     if partner_id in active_chats:
         del active_chats[partner_id]
+    
+    # Sync active chats with database
+    db.update_active_chats(active_chats)
+    
+    # Update user statistics
+    try:
+        # Increment chat count for both users
+        user_data = db.get_user_data(user_id)
+        user_data["chat_count"] = user_data.get("chat_count", 0) + 1
+        db.update_user_data(user_id, user_data)
+        
+        partner_data = db.get_user_data(partner_id)
+        partner_data["chat_count"] = partner_data.get("chat_count", 0) + 1
+        db.update_user_data(partner_id, partner_data)
+    except Exception as e:
+        logger.error(f"Error updating user statistics: {e}")
     
     # Log the end of the chat
     logger.info(f"Chat ended between {user_id} and {partner_id}")
@@ -1570,36 +1503,99 @@ async def end_chat(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
 
 async def save_avatar(user_id: str, photo_file) -> str:
     """Save avatar to disk and return path."""
-    # Create avatars directory if it doesn't exist
-    if not os.path.exists("avatars"):
-        os.makedirs("avatars")
-    
-    # Save avatar
-    avatar_path = f"avatars/{user_id}.jpg"
-    await photo_file.download_to_drive(avatar_path)
-    
-    return avatar_path
+    try:
+        # Create avatars directory if it doesn't exist
+        avatar_dir = "avatars"
+        if not os.path.exists(avatar_dir):
+            os.makedirs(avatar_dir)
+        
+        # Create default avatar if it doesn't exist
+        default_avatar = os.path.join(avatar_dir, "default.jpg")
+        if not os.path.exists(default_avatar):
+            try:
+                # Создаем простой дефолтный аватар - синий квадрат с текстом
+                img = Image.new('RGB', (200, 200), color=(73, 109, 137))
+                d = ImageDraw.Draw(img)
+                d.text((75, 90), "User", fill=(255, 255, 255))
+                img.save(default_avatar)
+                logger.info(f"Created default avatar at {default_avatar}")
+            except Exception as e:
+                logger.error(f"Could not create default avatar: {e}")
+        
+        # Генерируем уникальное имя файла с временной меткой
+        timestamp = int(time.time())
+        avatar_path = f"{avatar_dir}/{user_id}_{timestamp}.jpg"
+        
+        # Удаляем старые аватары пользователя
+        for old_file in os.listdir(avatar_dir):
+            if old_file.startswith(f"{user_id}_") and old_file.endswith(".jpg"):
+                try:
+                    os.remove(os.path.join(avatar_dir, old_file))
+                except Exception as e:
+                    logger.warning(f"Could not remove old avatar {old_file}: {e}")
+        
+        # Save avatar
+        await photo_file.download_to_drive(avatar_path)
+        
+        # Проверяем, что файл действительно создан
+        if not os.path.exists(avatar_path):
+            raise FileNotFoundError("Avatar file was not created")
+            
+        logger.info(f"Saved avatar for user {user_id} at {avatar_path}")
+        return avatar_path
+    except Exception as e:
+        logger.error(f"Error saving avatar for user {user_id}: {e}")
+        # Возвращаем путь к дефолтному аватару
+        return "avatars/default.jpg"
 
 async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Handle errors in the dispatcher."""
-    logger.error("Exception while handling an update:", exc_info=context.error)
+    error = context.error
     
-    # Send message to the user
+    # Получаем информацию об ошибке
+    error_type = type(error).__name__
+    error_message = str(error)
+    
+    # Логируем ошибку с деталями
+    logger.error(f"Error {error_type}: {error_message}", exc_info=context.error)
+    
+    # Отправляем сообщение пользователю, если возможно
     if update and isinstance(update, Update) and update.effective_message:
-        await update.effective_message.reply_text(
-            "Произошла ошибка при обработке вашего запроса. Пожалуйста, попробуйте еще раз."
-        )
+        try:
+            await update.effective_message.reply_text(
+                "Произошла ошибка при обработке вашего запроса. Пожалуйста, попробуйте еще раз."
+            )
+        except Exception as e:
+            logger.error(f"Error sending error message to user: {e}")
 
 async def main() -> None:
     """Start the bot."""
-    # Load user data first
-    global user_data
-    user_data = load_user_data()
-    logger.info(f"Loaded user data for {len(user_data)} users")
-    
     # Initialize database
     logger.info("Initializing database...")
     db.init_db()
+    
+    # Initialize active chats and searching users
+    global active_chats, searching_users
+    active_chats = db.get_active_chats()
+    searching_users = db.get_searching_users()
+    
+    # Создаем директорию для аватаров, если ее нет
+    avatar_dir = "avatars"
+    if not os.path.exists(avatar_dir):
+        os.makedirs(avatar_dir)
+    
+    # Создаем дефолтный аватар, если его нет
+    default_avatar = os.path.join(avatar_dir, "default.jpg")
+    if not os.path.exists(default_avatar):
+        try:
+            # Создаем простой дефолтный аватар - синий квадрат с текстом
+            img = Image.new('RGB', (200, 200), color=(73, 109, 137))
+            d = ImageDraw.Draw(img)
+            d.text((75, 90), "User", fill=(255, 255, 255))
+            img.save(default_avatar)
+            logger.info(f"Created default avatar at {default_avatar}")
+        except Exception as e:
+            logger.error(f"Could not create default avatar: {e}")
     
     # Get token from environment variable or use default for local development
     token = os.environ.get("TELEGRAM_BOT_TOKEN", "8039344227:AAEDCP_902a3r52JIdM9REqUyPx-p2IVtxA")
@@ -1658,6 +1654,25 @@ async def main() -> None:
 
 if __name__ == "__main__":
     try:
+        # Создаем директорию для аватаров, если ее нет
+        avatar_dir = "avatars"
+        if not os.path.exists(avatar_dir):
+            os.makedirs(avatar_dir)
+        
+        # Создаем дефолтный аватар, если его нет
+        default_avatar = os.path.join(avatar_dir, "default.jpg")
+        if not os.path.exists(default_avatar):
+            try:
+                # Создаем простой дефолтный аватар - синий квадрат с текстом
+                img = Image.new('RGB', (200, 200), color=(73, 109, 137))
+                d = ImageDraw.Draw(img)
+                d.text((75, 90), "User", fill=(255, 255, 255))
+                img.save(default_avatar)
+                logger.info(f"Created default avatar at {default_avatar}")
+            except Exception as e:
+                logger.error(f"Could not create default avatar: {e}")
+        
+        # Запускаем бота
         asyncio.run(main())
     except KeyboardInterrupt:
         logger.info("Bot stopped by user")
