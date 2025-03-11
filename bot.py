@@ -106,22 +106,22 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
         user_id = str(update.effective_user.id)
         logger.info(f"Received /start command from user {user_id}")
         
-        # Log the current state of user_data
-        logger.info(f"Current user_data contains {len(user_data)} users")
+        # Get user data from database
+        user_data = db.get_user_data(user_id)
         
         # Initialize user data if not exists
-        if user_id not in user_data:
-            logger.info(f"User {user_id} not found in user_data, initializing new entry")
-            user_data[user_id] = {
+        if not user_data:
+            logger.info(f"User {user_id} not found in database, initializing new entry")
+            user_data = {
                 "join_date": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
                 "chat_count": 0,
                 "rating": 0,
                 "rating_count": 0
             }
-            save_user_data(user_data)
+            db.update_user_data(user_id, user_data)
             logger.info(f"Initialized user data for user {user_id}")
         else:
-            logger.info(f"User {user_id} found in user_data")
+            logger.info(f"User {user_id} found in database")
         
         # Send welcome message with main menu
         try:
@@ -270,13 +270,13 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         ]
         
         # Get current interests to show selection state
-        if user_id in user_data:
-            interests = user_data[user_id].get("interests", [])
-            keyboard = [
-                [InlineKeyboardButton("💘 Флирт " + ("✅" if "flirt" in interests else ""), callback_data="interest_flirt")],
-                [InlineKeyboardButton("💬 Общение " + ("✅" if "chat" in interests else ""), callback_data="interest_chat")],
-                [InlineKeyboardButton("🔙 Назад к профилю", callback_data="profile")]
-            ]
+        user_data = db.get_user_data(user_id)
+        interests = user_data.get("interests", [])
+        keyboard = [
+            [InlineKeyboardButton("💘 Флирт " + ("✅" if "flirt" in interests else ""), callback_data="interest_flirt")],
+            [InlineKeyboardButton("💬 Общение " + ("✅" if "chat" in interests else ""), callback_data="interest_chat")],
+            [InlineKeyboardButton("🔙 Назад к профилю", callback_data="profile")]
+        ]
         
         await query.edit_message_text(
             text="*Выберите ваши интересы:*\n\nВыбранные интересы помогают находить собеседников со схожими интересами.",
@@ -288,14 +288,14 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     elif query.data.startswith("interest_"):
         interest = query.data.split("_")[1]
         
-        if user_id in user_data:
-            interests = user_data[user_id].get("interests", [])
-            if interest in interests:
-                interests.remove(interest)
-            else:
-                interests.append(interest)
-            user_data[user_id]["interests"] = interests
-            save_user_data(user_data)
+        user_data = db.get_user_data(user_id)
+        interests = user_data.get("interests", [])
+        if interest in interests:
+            interests.remove(interest)
+        else:
+            interests.append(interest)
+        user_data["interests"] = interests
+        db.update_user_data(user_id, user_data)
         
         keyboard = [
             [InlineKeyboardButton("💘 Флирт " + ("✅" if "flirt" in interests else ""), callback_data="interest_flirt")],
@@ -390,9 +390,9 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     
     elif query.data.startswith("gender_"):
         gender = query.data.split("_")[1]
-        if user_id in user_data:
-            user_data[user_id]["gender"] = gender
-            save_user_data(user_data)
+        user_data = db.get_user_data(user_id)
+        user_data["gender"] = gender
+        db.update_user_data(user_id, user_data)
         
         # Сразу возвращаемся к редактированию профиля без промежуточного сообщения
         keyboard = [
@@ -781,9 +781,9 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
             photo_file = await update.message.photo[-1].get_file()
             avatar_path = await save_avatar(user_id, photo_file)
             
-            if user_id in user_data:
-                user_data[user_id]["avatar"] = avatar_path
-                save_user_data(user_data)
+            user_data = db.get_user_data(user_id)
+            user_data["avatar"] = avatar_path
+            db.update_user_data(user_id, user_data)
             
             # Get profile message details
             profile_message_id = context.user_data.get("profile_message_id")
@@ -1216,9 +1216,9 @@ async def handle_avatar_upload(update: Update, context: ContextTypes.DEFAULT_TYP
         photo_file = await update.message.photo[-1].get_file()
         avatar_path = await save_avatar(user_id, photo_file)
         
-        if user_id in user_data:
-            user_data[user_id]["avatar"] = avatar_path
-            save_user_data(user_data)
+        user_data = db.get_user_data(user_id)
+        user_data["avatar"] = avatar_path
+        db.update_user_data(user_id, user_data)
         
         # Show profile
         await update.message.reply_text(
