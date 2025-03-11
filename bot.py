@@ -12,7 +12,6 @@ from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, ReplyKe
 from telegram.ext import Application, CommandHandler, CallbackQueryHandler, MessageHandler, filters, ContextTypes, ConversationHandler
 import telegram
 from dotenv import load_dotenv
-from PIL import Image, ImageDraw, ImageFont
 
 import database as db
 
@@ -882,17 +881,6 @@ async def continuous_search(user_id: str, context: ContextTypes.DEFAULT_TYPE) ->
                             [InlineKeyboardButton("❌ Завершить чат", callback_data="end_chat")]
                         ])
                     )
-                    
-                    # Отправляем сообщение партнеру
-                    await context.bot.edit_message_text(
-                        chat_id=partner_chat_id,
-                        message_id=partner_message_id,
-                        text="✅ *Собеседник найден!*\n\nМожете начинать общение.",
-                        parse_mode="Markdown",
-                        reply_markup=InlineKeyboardMarkup([
-                            [InlineKeyboardButton("❌ Завершить чат", callback_data="end_chat")]
-                        ])
-                    )
                 except Exception as e:
                     logger.error(f"Error notifying users about match: {e}")
                 
@@ -1509,18 +1497,10 @@ async def save_avatar(user_id: str, photo_file) -> str:
         if not os.path.exists(avatar_dir):
             os.makedirs(avatar_dir)
         
-        # Create default avatar if it doesn't exist
+        # Проверка наличия дефолтного аватара
         default_avatar = os.path.join(avatar_dir, "default.jpg")
         if not os.path.exists(default_avatar):
-            try:
-                # Создаем простой дефолтный аватар - синий квадрат с текстом
-                img = Image.new('RGB', (200, 200), color=(73, 109, 137))
-                d = ImageDraw.Draw(img)
-                d.text((75, 90), "User", fill=(255, 255, 255))
-                img.save(default_avatar)
-                logger.info(f"Created default avatar at {default_avatar}")
-            except Exception as e:
-                logger.error(f"Could not create default avatar: {e}")
+            logger.warning(f"Default avatar does not exist at {default_avatar}. User avatars may not display correctly.")
         
         # Генерируем уникальное имя файла с временной меткой
         timestamp = int(time.time())
@@ -1545,7 +1525,7 @@ async def save_avatar(user_id: str, photo_file) -> str:
         return avatar_path
     except Exception as e:
         logger.error(f"Error saving avatar for user {user_id}: {e}")
-        # Возвращаем путь к дефолтному аватару
+        # Возвращаем путь к дефолтному аватару, даже если он может не существовать
         return "avatars/default.jpg"
 
 async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -1584,18 +1564,10 @@ async def main() -> None:
     if not os.path.exists(avatar_dir):
         os.makedirs(avatar_dir)
     
-    # Создаем дефолтный аватар, если его нет
+    # Проверяем наличие дефолтного аватара
     default_avatar = os.path.join(avatar_dir, "default.jpg")
     if not os.path.exists(default_avatar):
-        try:
-            # Создаем простой дефолтный аватар - синий квадрат с текстом
-            img = Image.new('RGB', (200, 200), color=(73, 109, 137))
-            d = ImageDraw.Draw(img)
-            d.text((75, 90), "User", fill=(255, 255, 255))
-            img.save(default_avatar)
-            logger.info(f"Created default avatar at {default_avatar}")
-        except Exception as e:
-            logger.error(f"Could not create default avatar: {e}")
+        logger.warning(f"Default avatar does not exist at {default_avatar}. User avatars may not display correctly.")
     
     # Get token from environment variable or use default for local development
     token = os.environ.get("TELEGRAM_BOT_TOKEN", "8039344227:AAEDCP_902a3r52JIdM9REqUyPx-p2IVtxA")
@@ -1659,18 +1631,10 @@ if __name__ == "__main__":
         if not os.path.exists(avatar_dir):
             os.makedirs(avatar_dir)
         
-        # Создаем дефолтный аватар, если его нет
+        # Проверяем наличие дефолтного аватара
         default_avatar = os.path.join(avatar_dir, "default.jpg")
         if not os.path.exists(default_avatar):
-            try:
-                # Создаем простой дефолтный аватар - синий квадрат с текстом
-                img = Image.new('RGB', (200, 200), color=(73, 109, 137))
-                d = ImageDraw.Draw(img)
-                d.text((75, 90), "User", fill=(255, 255, 255))
-                img.save(default_avatar)
-                logger.info(f"Created default avatar at {default_avatar}")
-            except Exception as e:
-                logger.error(f"Could not create default avatar: {e}")
+            logger.warning(f"Default avatar does not exist at {default_avatar}. User avatars may not display correctly.")
         
         # Запускаем бота
         asyncio.run(main())
