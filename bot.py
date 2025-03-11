@@ -158,7 +158,55 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     
     await query.answer()
     
-    if query.data == "find_chat":
+    # Обработка кнопок оценки собеседника
+    if query.data.startswith("rate_pos_") or query.data.startswith("rate_neg_"):
+        # Извлекаем ID оцениваемого пользователя
+        rated_user_id = query.data.split("_")[2]
+        is_positive = query.data.startswith("rate_pos_")
+        
+        # Обновляем рейтинг пользователя
+        try:
+            user_data = db.get_user_data(rated_user_id)
+            
+            # Текущий рейтинг
+            current_rating = user_data.get("rating", 0)
+            rating_count = user_data.get("rating_count", 0)
+            
+            # Обновляем рейтинг
+            if is_positive:
+                user_data["rating"] = current_rating + 1
+            else:
+                user_data["rating"] = current_rating - 1
+                
+            user_data["rating_count"] = rating_count + 1
+            
+            # Сохраняем обновленные данные
+            db.update_user_data(rated_user_id, user_data)
+            
+            # Логируем оценку
+            logger.info(f"User {user_id} rated user {rated_user_id} {'positively' if is_positive else 'negatively'}")
+            
+            # Отправляем сообщение пользователю
+            await query.edit_message_text(
+                text=f"{'👍' if is_positive else '👎'} Спасибо за оценку! Ваш отзыв был успешно учтен.",
+                reply_markup=InlineKeyboardMarkup([
+                    [InlineKeyboardButton("🔍 Новый поиск", callback_data="find_chat")],
+                    [InlineKeyboardButton("🔙 Главное меню", callback_data="back_to_main")]
+                ])
+            )
+        except Exception as e:
+            logger.error(f"Error updating user rating: {e}")
+            await query.edit_message_text(
+                text="❌ Произошла ошибка при сохранении оценки. Пожалуйста, попробуйте позже.",
+                reply_markup=InlineKeyboardMarkup([
+                    [InlineKeyboardButton("🔍 Новый поиск", callback_data="find_chat")],
+                    [InlineKeyboardButton("🔙 Главное меню", callback_data="back_to_main")]
+                ])
+            )
+        
+        return START
+    
+    elif query.data == "find_chat":
         return await find_chat(update, context)
     
     elif query.data == "group_chat":
@@ -390,6 +438,47 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         context.user_data["edit_field"] = "avatar"
         return EDIT_PROFILE
     
+    elif query.data == "view_avatar":
+        # Получаем данные пользователя
+        user_info = db.get_user_data(user_id)
+        avatar_path = user_info.get('avatar')
+        
+        if avatar_path and os.path.exists(avatar_path):
+            try:
+                # Отправляем аватар пользователю
+                with open(avatar_path, 'rb') as avatar_file:
+                    await context.bot.send_photo(
+                        chat_id=update.effective_chat.id,
+                        photo=avatar_file,
+                        caption="🖼 Ваш текущий аватар"
+                    )
+                
+                # Оставляем текущее сообщение без изменений
+                await query.answer("Аватар успешно отправлен")
+            except Exception as e:
+                logger.error(f"Error sending avatar: {e}")
+                await query.answer("Ошибка при отправке аватара")
+        else:
+            # Если аватар не найден
+            await query.answer("Аватар не найден")
+            
+            # Обновляем данные пользователя, чтобы удалить недействительный путь к аватару
+            if user_info.get('avatar'):
+                user_info.pop('avatar')
+                db.update_user_data(user_id, user_info)
+                
+            # Предлагаем загрузить новый аватар
+            await query.edit_message_text(
+                text="❌ *Аватар не найден*\n\nВозможно, файл был удален. Загрузите новый аватар.",
+                parse_mode="Markdown",
+                reply_markup=InlineKeyboardMarkup([
+                    [InlineKeyboardButton("🖼 Загрузить аватар", callback_data="upload_avatar")],
+                    [InlineKeyboardButton("🔙 Назад", callback_data="edit_profile")]
+                ])
+            )
+        
+        return PROFILE
+    
     elif query.data == "create_group":
         # Create a new group chat
         return await create_group_chat(update, context)
@@ -474,6 +563,63 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
                         chat_id=int(partner_id),
                         text="[Собеседник пытался отправить файл, но он слишком большой]"
                     )
+            elif update.message.location:
+                # Поддержка передачи локации
+                await context.bot.send_location(
+                    chat_id=int(partner_id),
+                    latitude=update.message.location.latitude,
+                    longitude=update.message.location.longitude
+                )
+                # Для безопасности также предупредим пользователя
+                await update.message.reply_text(
+                    "⚠️ Обратите внимание, что отправка геолокации может раскрыть информацию о вашем местоположении.",
+                    reply_markup=InlineKeyboardMarkup([
+                        [InlineKeyboardButton("❌ Завершить чат", callback_data="end_chat")]
+                    ])
+                )
+            elif update.message.venue:
+                # Поддержка передачи мест (venue)
+                await context.bot.send_venue(
+                    chat_id=int(partner_id),
+                    latitude=update.message.venue.location.latitude,
+                    longitude=update.message.venue.location.longitude,
+                    title=update.message.venue.title,
+                    address=update.message.venue.address
+                )
+                # Предупреждение о безопасности
+                await update.message.reply_text(
+                    "⚠️ Обратите внимание, что отправка мест может раскрыть информацию о вашем местоположении.",
+                    reply_markup=InlineKeyboardMarkup([
+                        [InlineKeyboardButton("❌ Завершить чат", callback_data="end_chat")]
+                    ])
+                )
+            elif update.message.contact:
+                # Вместо передачи контакта отправляем анонимизированную версию
+                contact = update.message.contact
+                anonymized_text = f"[Контакт]\nИмя: {contact.first_name}"
+                if contact.last_name:
+                    anonymized_text += f" {contact.last_name[:1]}."
+                
+                # Не отправляем номер телефона для сохранения анонимности
+                await context.bot.send_message(
+                    chat_id=int(partner_id),
+                    text=anonymized_text
+                )
+                
+                # Предупреждение о безопасности
+                await update.message.reply_text(
+                    "⚠️ В целях безопасности номер телефона контакта не был передан собеседнику.",
+                    reply_markup=InlineKeyboardMarkup([
+                        [InlineKeyboardButton("❌ Завершить чат", callback_data="end_chat")]
+                    ])
+                )
+            elif update.message.poll:
+                # Отправляем сообщение о том, что опросы не поддерживаются
+                await context.bot.send_message(
+                    chat_id=int(partner_id),
+                    text="[Собеседник попытался отправить опрос. Опросы не поддерживаются в анонимном чате.]"
+                )
+                await update.message.reply_text("❗ Опросы не поддерживаются в анонимном чате.")
             else:
                 await context.bot.send_message(
                     chat_id=int(partner_id),
@@ -822,32 +968,66 @@ async def continuous_search(user_id: str, context: ContextTypes.DEFAULT_TYPE) ->
         update_timer_task = asyncio.create_task(update_search_timer_for_user(user_id, context, chat_id, message_id, start_time))
         
         # Search for a partner
+        search_rounds = 0
         while user_id in searching_users:
-            # Find potential partners с учетом предпочтений
-            potential_partners = []
+            search_rounds += 1
+            
+            # Get user data for matching
             user_data = db.get_user_data(user_id)
             user_gender = user_data.get("gender")
+            user_age = user_data.get("age")
+            
+            # Find potential partners with different criteria based on search rounds
+            potential_partners = []
+            best_partners = []  # Наиболее подходящие партнеры
+            
+            current_time = time.time()
+            elapsed_search_time = current_time - start_time
             
             for partner_id, partner_info in searching_users.items():
-                if partner_id != user_id:
-                    # Проверяем совместимость по полу, если указан
-                    if user_gender:
-                        partner_data = db.get_user_data(partner_id)
-                        partner_gender = partner_data.get("gender")
-                        # Если у обоих указан пол, проверяем совместимость
-                        if partner_gender and user_gender != partner_gender:
-                            potential_partners.append(partner_id)
-                    else:
-                        # Если пол не указан, добавляем всех
+                if partner_id == user_id:
+                    continue
+                    
+                partner_data = db.get_user_data(partner_id)
+                partner_gender = partner_data.get("gender")
+                partner_age = partner_data.get("age")
+                partner_start_time = partner_info.get("start_time", current_time)
+                partner_waiting_time = current_time - partner_start_time
+                
+                # В первые 20 секунд поиска ищем точное совпадение по полу и возрасту (±3 года)
+                if elapsed_search_time < 20 and user_gender and user_age and partner_gender and partner_age:
+                    if user_gender != partner_gender and abs(user_age - partner_age) <= 3:
+                        best_partners.append(partner_id)
+                    
+                # В следующие 20 секунд ищем совпадение по полу без учета возраста или по возрасту без учета пола
+                elif elapsed_search_time < 40:
+                    if user_gender and partner_gender and user_gender != partner_gender:
                         potential_partners.append(partner_id)
+                    elif user_age and partner_age and abs(user_age - partner_age) <= 5:
+                        potential_partners.append(partner_id)
+                        
+                # После 40 секунд ищем любого собеседника, но отдавая предпочтение тем, кто ждет дольше
+                else:
+                    # Добавляем всех, но с приоритетом для тех, кто ждет дольше
+                    potential_partners.append(partner_id)
+                    # Если партнер ищет больше минуты, добавляем его как приоритетного
+                    if partner_waiting_time > 60:
+                        best_partners.append(partner_id)
+            
+            # Выбираем партнера из лучших совпадений, если они есть
+            selected_partner = None
+            if best_partners:
+                selected_partner = random.choice(best_partners)
+            elif potential_partners:
+                selected_partner = random.choice(potential_partners)
             
             # If found a partner
-            if potential_partners:
+            if selected_partner:
                 # Отменяем задачу обновления таймера
                 update_timer_task.cancel()
                 
-                # Choose a random partner
-                partner_id = random.choice(potential_partners)
+                # Get partner info
+                partner_id = selected_partner
                 partner_info = searching_users[partner_id]
                 
                 # Remove both users from searching
@@ -935,8 +1115,8 @@ async def show_profile(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
     """Show user profile."""
     user_id = str(update.effective_user.id)
     
-    # Get user data
-    user_info = user_data.get(user_id, {})
+    # Get user data из базы данных
+    user_info = db.get_user_data(user_id)
     
     # Build profile text
     profile_text = "*👤 Ваш профиль:*\n\n"
@@ -963,9 +1143,41 @@ async def show_profile(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
     else:
         profile_text += "\n*Интересы:* Не указаны\n"
     
-    # Add stats
+    # Add stats and rating
     profile_text += f"\n*Статистика:*\n"
     profile_text += f"• 💬 Всего чатов: {user_info.get('chat_count', 0)}\n"
+    
+    # Добавляем информацию о рейтинге
+    rating = user_info.get('rating', 0)
+    rating_count = user_info.get('rating_count', 0)
+    
+    # Формируем отображение рейтинга
+    if rating_count > 0:
+        # Показываем соотношение положительных и отрицательных отзывов
+        positive_percentage = ((rating + rating_count) / (2 * rating_count)) * 100
+        rating_stars = ""
+        
+        # Визуализация рейтинга звездочками
+        if positive_percentage >= 90:
+            rating_stars = "⭐⭐⭐⭐⭐"
+        elif positive_percentage >= 80:
+            rating_stars = "⭐⭐⭐⭐☆"
+        elif positive_percentage >= 70:
+            rating_stars = "⭐⭐⭐☆☆"
+        elif positive_percentage >= 60:
+            rating_stars = "⭐⭐☆☆☆"
+        elif positive_percentage >= 50:
+            rating_stars = "⭐☆☆☆☆"
+        else:
+            rating_stars = "☆☆☆☆☆"
+        
+        profile_text += f"• 👍 Рейтинг: {rating_stars} ({positive_percentage:.1f}%, всего {rating_count} оценок)\n"
+    else:
+        profile_text += f"• 👍 Рейтинг: Нет оценок\n"
+    
+    # Добавляем дату регистрации
+    join_date = user_info.get('join_date', 'неизвестно')
+    profile_text += f"• 📆 Дата регистрации: {join_date}\n"
     
     # Create keyboard
     keyboard = [
@@ -973,6 +1185,11 @@ async def show_profile(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
         [InlineKeyboardButton("💬 Интересы", callback_data="interest_edit")],
         [InlineKeyboardButton("🔙 Назад", callback_data="back_to_menu")]
     ]
+    
+    # Проверяем наличие аватара и добавляем кнопку для его просмотра
+    avatar_path = user_info.get('avatar')
+    if avatar_path and os.path.exists(avatar_path):
+        keyboard.insert(1, [InlineKeyboardButton("🖼 Посмотреть аватар", callback_data="view_avatar")])
     
     # Send or edit message
     if update.callback_query:
@@ -1326,11 +1543,67 @@ async def handle_group_message(update: Update, context: ContextTypes.DEFAULT_TYP
                         text=f"{gender} *Участник {user_index}* отправил стикер",
                         parse_mode="Markdown"
                     )
+                elif update.message.location:
+                    # Поддержка передачи локации
+                    await context.bot.send_location(
+                        chat_id=int(member_id),
+                        latitude=update.message.location.latitude,
+                        longitude=update.message.location.longitude
+                    )
+                    # Для безопасности также предупредим пользователя
+                    await update.message.reply_text(
+                        "⚠️ Обратите внимание, что отправка геолокации может раскрыть информацию о вашем местоположении.",
+                        reply_markup=InlineKeyboardMarkup([
+                            [InlineKeyboardButton("❌ Завершить чат", callback_data="end_chat")]
+                        ])
+                    )
+                elif update.message.venue:
+                    # Поддержка передачи мест (venue)
+                    await context.bot.send_venue(
+                        chat_id=int(member_id),
+                        latitude=update.message.venue.location.latitude,
+                        longitude=update.message.venue.location.longitude,
+                        title=update.message.venue.title,
+                        address=update.message.venue.address
+                    )
+                    # Предупреждение о безопасности
+                    await update.message.reply_text(
+                        "⚠️ Обратите внимание, что отправка мест может раскрыть информацию о вашем местоположении.",
+                        reply_markup=InlineKeyboardMarkup([
+                            [InlineKeyboardButton("❌ Завершить чат", callback_data="end_chat")]
+                        ])
+                    )
+                elif update.message.contact:
+                    # Вместо передачи контакта отправляем анонимизированную версию
+                    contact = update.message.contact
+                    anonymized_text = f"[Контакт]\nИмя: {contact.first_name}"
+                    if contact.last_name:
+                        anonymized_text += f" {contact.last_name[:1]}."
+                    
+                    # Не отправляем номер телефона для сохранения анонимности
+                    await context.bot.send_message(
+                        chat_id=int(member_id),
+                        text=anonymized_text
+                    )
+                    
+                    # Предупреждение о безопасности
+                    await update.message.reply_text(
+                        "⚠️ В целях безопасности номер телефона контакта не был передан собеседнику.",
+                        reply_markup=InlineKeyboardMarkup([
+                            [InlineKeyboardButton("❌ Завершить чат", callback_data="end_chat")]
+                        ])
+                    )
+                elif update.message.poll:
+                    # Отправляем сообщение о том, что опросы не поддерживаются
+                    await context.bot.send_message(
+                        chat_id=int(member_id),
+                        text="[Собеседник попытался отправить опрос. Опросы не поддерживаются в анонимном чате.]"
+                    )
+                    await update.message.reply_text("❗ Опросы не поддерживаются в анонимном чате.")
                 else:
                     await context.bot.send_message(
                         chat_id=int(member_id),
-                        text=f"{gender} *Участник {user_index}:*\n[Сообщение не поддерживается]",
-                        parse_mode="Markdown"
+                        text="[Сообщение не поддерживается]"
                     )
             except Exception as e:
                 logger.error(f"Error forwarding group message to {member_id}: {e}")
@@ -1420,6 +1693,16 @@ async def end_chat_session(user_id: str, partner_id: str, context: ContextTypes.
     """End a chat session between two users."""
     global active_chats
     
+    # Проверка, что чат действительно существует
+    if user_id not in active_chats or partner_id not in active_chats:
+        logger.warning(f"Attempted to end non-existent chat between {user_id} and {partner_id}")
+        return
+        
+    # Check if the users are actually chatting with each other
+    if active_chats.get(user_id) != partner_id or active_chats.get(partner_id) != user_id:
+        logger.warning(f"Chat mismatch: {user_id} -> {active_chats.get(user_id)}, {partner_id} -> {active_chats.get(partner_id)}")
+        return
+    
     # Remove from active chats
     if user_id in active_chats:
         del active_chats[user_id]
@@ -1445,21 +1728,45 @@ async def end_chat_session(user_id: str, partner_id: str, context: ContextTypes.
     # Log the end of the chat
     logger.info(f"Chat ended between {user_id} and {partner_id}")
     
-    # Notify the partner that the chat has ended
+    # Clear any resources associated with this chat
     try:
-        await context.bot.send_message(
-            chat_id=partner_id,
-            text="❌ *Собеседник покинул чат*\n\nВы можете начать новый поиск.",
-            parse_mode="Markdown",
-            reply_markup=InlineKeyboardMarkup([
-                [InlineKeyboardButton("🔍 Новый поиск", callback_data="find_chat")],
-                [InlineKeyboardButton("🔙 Главное меню", callback_data="back_to_menu")]
-            ])
-        )
-        
         # Clean up any pending messages or states
         context.bot_data.pop(f'last_msg_{partner_id}', None)
         context.bot_data.pop(f'last_msg_{user_id}', None)
+        
+        # Отключаем любые активные таймеры или задачи, связанные с чатом
+        # (если они были добавлены в других частях кода)
+        if f'chat_timer_{user_id}' in context.bot_data:
+            timer = context.bot_data.pop(f'chat_timer_{user_id}')
+            if hasattr(timer, 'cancel'):
+                timer.cancel()
+                
+        if f'chat_timer_{partner_id}' in context.bot_data:
+            timer = context.bot_data.pop(f'chat_timer_{partner_id}')
+            if hasattr(timer, 'cancel'):
+                timer.cancel()
+    except Exception as e:
+        logger.error(f"Error clearing chat resources: {e}")
+    
+    # Notify the partner that the chat has ended
+    try:
+        # Клавиатура для оценки собеседника
+        rating_keyboard = [
+            [
+                InlineKeyboardButton("👍", callback_data=f"rate_pos_{user_id}"),
+                InlineKeyboardButton("👎", callback_data=f"rate_neg_{user_id}")
+            ],
+            [InlineKeyboardButton("🔍 Новый поиск", callback_data="find_chat")],
+            [InlineKeyboardButton("🔙 Главное меню", callback_data="back_to_menu")]
+        ]
+        
+        await context.bot.send_message(
+            chat_id=partner_id,
+            text="❌ *Собеседник покинул чат*\n\nВы можете оценить собеседника и начать новый поиск.",
+            parse_mode="Markdown",
+            reply_markup=InlineKeyboardMarkup(rating_keyboard)
+        )
+        
     except Exception as e:
         logger.error(f"Error notifying partner about chat end: {e}")
 
@@ -1472,20 +1779,43 @@ async def end_chat(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
         
         # End chat session
         await end_chat_session(user_id, partner_id, context)
-    
-    # Show main menu
-    if update.callback_query:
-        await update.callback_query.edit_message_text(
-            text=WELCOME_TEXT,
-            parse_mode="Markdown",
-            reply_markup=InlineKeyboardMarkup(MAIN_KEYBOARD)
-        )
+        
+        # Предлагаем оценить собеседника
+        rating_keyboard = [
+            [
+                InlineKeyboardButton("👍", callback_data=f"rate_pos_{partner_id}"),
+                InlineKeyboardButton("👎", callback_data=f"rate_neg_{partner_id}")
+            ],
+            [InlineKeyboardButton("🔍 Новый поиск", callback_data="find_chat")],
+            [InlineKeyboardButton("🔙 Главное меню", callback_data="back_to_menu")]
+        ]
+        
+        if update.callback_query:
+            await update.callback_query.edit_message_text(
+                text="❌ *Чат завершен*\n\nВы можете оценить собеседника и начать новый поиск.",
+                parse_mode="Markdown",
+                reply_markup=InlineKeyboardMarkup(rating_keyboard)
+            )
+        else:
+            await update.message.reply_text(
+                text="❌ *Чат завершен*\n\nВы можете оценить собеседника и начать новый поиск.",
+                parse_mode="Markdown",
+                reply_markup=InlineKeyboardMarkup(rating_keyboard)
+            )
     else:
-        await update.message.reply_text(
-            text=WELCOME_TEXT,
-            parse_mode="Markdown",
-            reply_markup=InlineKeyboardMarkup(MAIN_KEYBOARD)
-        )
+        # Если пользователь не находится в чате, просто показываем главное меню
+        if update.callback_query:
+            await update.callback_query.edit_message_text(
+                text=WELCOME_TEXT,
+                parse_mode="Markdown",
+                reply_markup=InlineKeyboardMarkup(MAIN_KEYBOARD)
+            )
+        else:
+            await update.message.reply_text(
+                text=WELCOME_TEXT,
+                parse_mode="Markdown",
+                reply_markup=InlineKeyboardMarkup(MAIN_KEYBOARD)
+            )
     
     return START
 
@@ -1536,15 +1866,75 @@ async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> N
     error_type = type(error).__name__
     error_message = str(error)
     
-    # Логируем ошибку с деталями
-    logger.error(f"Error {error_type}: {error_message}", exc_info=context.error)
+    # Обработка различных типов ошибок
+    if isinstance(error, telegram.error.Unauthorized):
+        # Пользователь заблокировал бота или удалил чат
+        logger.warning(f"Unauthorized error: {error_message}")
+        # Не нужно отправлять сообщение, так как пользователь заблокировал бота
+        return
+        
+    elif isinstance(error, telegram.error.BadRequest):
+        # Некорректный запрос к API
+        logger.warning(f"Bad request: {error_message}")
+        
+        # Проверяем типичные ошибки BadRequest
+        if "Message is not modified" in error_message:
+            # Игнорируем эту ошибку, она возникает при повторном обновлении сообщения без изменений
+            return
+        elif "Message to edit not found" in error_message:
+            # Сообщение, которое пытаемся редактировать, не найдено
+            pass
+        elif "Can't parse entities" in error_message:
+            # Ошибка форматирования сообщения
+            logger.error(f"Formatting error in message: {error_message}")
+            
+    elif isinstance(error, telegram.error.TimedOut):
+        # Тайм-аут запроса к API
+        logger.warning(f"Request timed out: {error_message}")
+        # Обычно не требует действий, так как Telegram автоматически повторяет запрос
+        return
+        
+    elif isinstance(error, telegram.error.NetworkError):
+        # Проблемы с сетью
+        logger.warning(f"Network error: {error_message}")
+        
+    elif isinstance(error, telegram.error.RetryAfter):
+        # Достигнут лимит запросов, нужно подождать
+        retry_time = error.retry_after if hasattr(error, 'retry_after') else 30
+        logger.warning(f"Rate limit exceeded. Retry after {retry_time} seconds")
+        # Можно добавить логику ожидания и повторной отправки
+        
+    elif isinstance(error, telegram.error.TelegramError):
+        # Другие ошибки Telegram API
+        logger.error(f"Telegram API error: {error_message}")
+        
+    else:
+        # Неожиданные ошибки
+        logger.error(f"Unexpected error {error_type}: {error_message}", exc_info=context.error)
+    
+    # Логируем полную информацию об ошибке для анализа
+    logger.error(f"Update that caused error: {update}", exc_info=context.error)
     
     # Отправляем сообщение пользователю, если возможно
     if update and isinstance(update, Update) and update.effective_message:
         try:
-            await update.effective_message.reply_text(
-                "Произошла ошибка при обработке вашего запроса. Пожалуйста, попробуйте еще раз."
-            )
+            # Различные сообщения в зависимости от типа ошибки
+            if isinstance(error, telegram.error.BadRequest) and "Can't parse entities" in error_message:
+                await update.effective_message.reply_text(
+                    "Ошибка в форматировании сообщения. Пожалуйста, проверьте синтаксис Markdown."
+                )
+            elif isinstance(error, telegram.error.RetryAfter):
+                await update.effective_message.reply_text(
+                    "Достигнут лимит запросов. Пожалуйста, подождите немного перед следующей командой."
+                )
+            elif isinstance(error, telegram.error.NetworkError):
+                await update.effective_message.reply_text(
+                    "Проблема с подключением к серверам Telegram. Пожалуйста, попробуйте позже."
+                )
+            else:
+                await update.effective_message.reply_text(
+                    "Произошла ошибка при обработке вашего запроса. Пожалуйста, попробуйте еще раз."
+                )
         except Exception as e:
             logger.error(f"Error sending error message to user: {e}")
 
