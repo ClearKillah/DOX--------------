@@ -2,6 +2,7 @@ import os
 import json
 import logging
 from typing import Dict, Any, Optional
+import time
 
 logger = logging.getLogger(__name__)
 
@@ -82,22 +83,89 @@ def update_user_data(user_id: str, data: Dict[str, Any]) -> None:
 def get_active_chats() -> Dict[str, str]:
     """Get active chats."""
     global active_chats_cache
+    
+    if not active_chats_cache:
+        try:
+            # Try to load from file
+            if os.path.exists("active_chats.json"):
+                with open("active_chats.json", "r") as f:
+                    active_chats_cache = json.load(f)
+                    
+                # Validate loaded chats
+                valid_chats = {}
+                for user_id, partner_id in active_chats_cache.items():
+                    if partner_id in active_chats_cache and active_chats_cache[partner_id] == user_id:
+                        valid_chats[user_id] = partner_id
+                active_chats_cache = valid_chats
+        except Exception as e:
+            logger.error(f"Error loading active chats from file: {e}")
+            active_chats_cache = {}
+    
     return active_chats_cache
 
 def update_active_chats(active_chats: Dict[str, str]) -> None:
     """Update active chats."""
     global active_chats_cache
-    active_chats_cache = active_chats
+    
+    # Validate chat pairs
+    valid_chats = {}
+    for user_id, partner_id in active_chats.items():
+        # Check if both users are connected to each other
+        if partner_id in active_chats and active_chats[partner_id] == user_id:
+            valid_chats[user_id] = partner_id
+    
+    active_chats_cache = valid_chats
+    
+    try:
+        # Try to save to file for persistence
+        with open("active_chats.json", "w") as f:
+            json.dump(active_chats_cache, f)
+    except Exception as e:
+        logger.error(f"Error saving active chats to file: {e}")
 
 def get_searching_users() -> Dict[str, Any]:
     """Get searching users."""
     global searching_users_cache
+    
+    if not searching_users_cache:
+        try:
+            # Try to load from file
+            if os.path.exists("searching_users.json"):
+                with open("searching_users.json", "r") as f:
+                    searching_users_cache = json.load(f)
+                    
+                # Remove any stale searches
+                current_time = time.time()
+                valid_searches = {
+                    user_id: info for user_id, info in searching_users_cache.items()
+                    if current_time - info.get("start_time", 0) <= 120
+                }
+                searching_users_cache = valid_searches
+        except Exception as e:
+            logger.error(f"Error loading searching users from file: {e}")
+            searching_users_cache = {}
+    
     return searching_users_cache
 
 def update_searching_users(searching_users: Dict[str, Any]) -> None:
     """Update searching users."""
     global searching_users_cache
-    searching_users_cache = searching_users
+    
+    # Remove any users that have been searching for too long (over 2 minutes)
+    current_time = time.time()
+    valid_searches = {
+        user_id: info for user_id, info in searching_users.items()
+        if current_time - info.get("start_time", 0) <= 120
+    }
+    
+    searching_users_cache = valid_searches
+    
+    try:
+        # Try to save to file for persistence
+        with open("searching_users.json", "w") as f:
+            json.dump(searching_users_cache, f)
+    except Exception as e:
+        logger.error(f"Error saving searching users to file: {e}")
 
 def init_db() -> None:
     """Initialize the database by loading user data."""
