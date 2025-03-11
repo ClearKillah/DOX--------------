@@ -898,9 +898,16 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
 async def find_chat(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Start looking for a chat partner."""
     user_id = str(update.effective_user.id)
-    logger.debug(f"User {user_id} is looking for a chat partner")
+    logger.info(f"User {user_id} is looking for a chat partner")
     
-    # End current chat if any
+    # Check if user is already searching
+    if user_id in searching_users:
+        # Already searching, just update the message
+        if update.callback_query:
+            await update.callback_query.answer("Поиск уже идет...")
+        return START
+    
+    # Check if user is in active chat
     if user_id in active_chats:
         partner_id = active_chats[user_id]
         
@@ -909,44 +916,83 @@ async def find_chat(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
             try:
                 await context.bot.send_message(
                     chat_id=int(partner_id),
-                    text=WELCOME_TEXT,
+                    text="❌ *Собеседник покинул чат*\n\nМожете начать новый поиск.",
                     parse_mode="Markdown",
                     reply_markup=InlineKeyboardMarkup(MAIN_KEYBOARD)
                 )
                 del active_chats[partner_id]
             except Exception as e:
-                logger.error(f"Error showing welcome message to partner: {e}")
+                logger.error(f"Error notifying partner about chat end: {e}")
         
         del active_chats[user_id]
+        db.update_active_chats(active_chats)
+    
+    # Clean up any stale searches
+    current_time = time.time()
+    stale_users = [uid for uid, info in searching_users.items() 
+                  if current_time - info.get("start_time", 0) > 120]
+    
+    for stale_user in stale_users:
+        if stale_user in searching_users:
+            del searching_users[stale_user]
+    
+    if stale_users:
+        db.update_searching_users(searching_users)
     
     # Send initial search message
-    if update.callback_query:
-        search_message = await update.callback_query.edit_message_text(
-            text="🔍 *Поиск собеседника...*\n\n⏱ Время поиска: 00:00",
-            parse_mode="Markdown",
-            reply_markup=InlineKeyboardMarkup([
-                [InlineKeyboardButton("❌ Отменить поиск", callback_data="cancel_search")]
-            ])
-        )
-    else:
-        search_message = await context.bot.send_message(
-            chat_id=update.effective_chat.id,
-            text="🔍 *Поиск собеседника...*\n\n⏱ Время поиска: 00:00",
-            parse_mode="Markdown",
-            reply_markup=InlineKeyboardMarkup([
-                [InlineKeyboardButton("❌ Отменить поиск", callback_data="cancel_search")]
-            ])
-        )
-    
-    # Add user to searching users
-    searching_users[user_id] = {
-        "start_time": time.time(),
-        "message_id": search_message.message_id,
-        "chat_id": update.effective_chat.id
-    }
-    
-    # Start continuous search in background
-    asyncio.create_task(continuous_search(user_id, context))
+    try:
+        if update.callback_query:
+            search_message = await update.callback_query.edit_message_text(
+                text="🔍 *Поиск собеседника...*\n\n"
+                     "⏱ Время поиска: 00:00\n\n"
+                     "Пожалуйста, подождите...",
+                parse_mode="Markdown",
+                reply_markup=InlineKeyboardMarkup([
+                    [InlineKeyboardButton("❌ Отменить поиск", callback_data="cancel_search")]
+                ])
+            )
+        else:
+            search_message = await context.bot.send_message(
+                chat_id=update.effective_chat.id,
+                text="🔍 *Поиск собеседника...*\n\n"
+                     "⏱ Время поиска: 00:00\n\n"
+                     "Пожалуйста, подождите...",
+                parse_mode="Markdown",
+                reply_markup=InlineKeyboardMarkup([
+                    [InlineKeyboardButton("❌ Отменить поиск", callback_data="cancel_search")]
+                ])
+            )
+        
+        # Add user to searching users
+        searching_users[user_id] = {
+            "start_time": time.time(),
+            "message_id": search_message.message_id,
+            "chat_id": update.effective_chat.id
+        }
+        
+        # Update database
+        db.update_searching_users(searching_users)
+        
+        # Start continuous search in background
+        asyncio.create_task(continuous_search(user_id, context))
+        
+        # Log the number of users searching
+        logger.info(f"Currently searching users: {len(searching_users)}")
+        
+    except Exception as e:
+        logger.error(f"Error starting chat search: {e}")
+        if update.callback_query:
+            await update.callback_query.edit_message_text(
+                text="❌ *Ошибка*\n\nНе удалось начать поиск. Попробуйте позже.",
+                parse_mode="Markdown",
+                reply_markup=InlineKeyboardMarkup(MAIN_KEYBOARD)
+            )
+        else:
+            await update.message.reply_text(
+                text="❌ *Ошибка*\n\nНе удалось начать поиск. Попробуйте позже.",
+                parse_mode="Markdown",
+                reply_markup=InlineKeyboardMarkup(MAIN_KEYBOARD)
+            )
     
     return START
 
@@ -967,94 +1013,102 @@ async def continuous_search(user_id: str, context: ContextTypes.DEFAULT_TYPE) ->
         # Обновляем время поиска каждые 2 секунды
         update_timer_task = asyncio.create_task(update_search_timer_for_user(user_id, context, chat_id, message_id, start_time))
         
-        # Search for a partner
-        search_rounds = 0
+        # Get user data
+        user_data = db.get_user_data(user_id)
+        user_gender = user_data.get("gender")
+        user_age = user_data.get("age")
+        
         while user_id in searching_users:
-            search_rounds += 1
-            
-            # Get user data for matching
-            user_data = db.get_user_data(user_id)
-            user_gender = user_data.get("gender")
-            user_age = user_data.get("age")
-            
-            # Find potential partners with different criteria based on search rounds
-            potential_partners = []
-            best_partners = []  # Наиболее подходящие партнеры
-            
             current_time = time.time()
             elapsed_search_time = current_time - start_time
+            
+            # Collect all potential partners
+            potential_partners = []
             
             for partner_id, partner_info in searching_users.items():
                 if partner_id == user_id:
                     continue
-                    
+                
                 partner_data = db.get_user_data(partner_id)
                 partner_gender = partner_data.get("gender")
                 partner_age = partner_data.get("age")
-                partner_start_time = partner_info.get("start_time", current_time)
-                partner_waiting_time = current_time - partner_start_time
                 
-                # В первые 20 секунд поиска ищем точное совпадение по полу и возрасту (±3 года)
-                if elapsed_search_time < 20 and user_gender and user_age and partner_gender and partner_age:
-                    if user_gender != partner_gender and abs(user_age - partner_age) <= 3:
-                        best_partners.append(partner_id)
-                    
-                # В следующие 20 секунд ищем совпадение по полу без учета возраста или по возрасту без учета пола
-                elif elapsed_search_time < 40:
-                    if user_gender and partner_gender and user_gender != partner_gender:
-                        potential_partners.append(partner_id)
-                    elif user_age and partner_age and abs(user_age - partner_age) <= 5:
-                        potential_partners.append(partner_id)
-                        
-                # После 40 секунд ищем любого собеседника, но отдавая предпочтение тем, кто ждет дольше
+                # Calculate match score (higher is better)
+                score = 0
+                
+                # If both users have gender set and they're opposite, increase score
+                if user_gender and partner_gender and user_gender != partner_gender:
+                    score += 3
+                
+                # If both users have age set and they're close, increase score
+                if user_age and partner_age:
+                    age_diff = abs(user_age - partner_age)
+                    if age_diff <= 3:
+                        score += 2
+                    elif age_diff <= 5:
+                        score += 1
+                
+                # Add waiting time bonus (longer waiting = higher chance)
+                partner_waiting_time = current_time - partner_info.get("start_time", current_time)
+                if partner_waiting_time > 60:  # Waiting more than 1 minute
+                    score += 2
+                elif partner_waiting_time > 30:  # Waiting more than 30 seconds
+                    score += 1
+                
+                # Always add as potential partner with base score
+                potential_partners.append((partner_id, score))
+            
+            # If we have potential partners
+            if potential_partners:
+                # Sort by score (highest first)
+                potential_partners.sort(key=lambda x: x[1], reverse=True)
+                
+                # Select partner - prefer higher scores but allow some randomness
+                if len(potential_partners) > 3 and random.random() < 0.3:
+                    # 30% chance to pick from top 3
+                    selected_partner = random.choice(potential_partners[:3])[0]
                 else:
-                    # Добавляем всех, но с приоритетом для тех, кто ждет дольше
-                    potential_partners.append(partner_id)
-                    # Если партнер ищет больше минуты, добавляем его как приоритетного
-                    if partner_waiting_time > 60:
-                        best_partners.append(partner_id)
-            
-            # Выбираем партнера из лучших совпадений, если они есть
-            selected_partner = None
-            if best_partners:
-                selected_partner = random.choice(best_partners)
-            elif potential_partners:
-                selected_partner = random.choice(potential_partners)
-            
-            # If found a partner
-            if selected_partner:
-                # Отменяем задачу обновления таймера
-                update_timer_task.cancel()
+                    # Otherwise pick the highest score
+                    selected_partner = potential_partners[0][0]
                 
                 # Get partner info
-                partner_id = selected_partner
-                partner_info = searching_users[partner_id]
+                partner_info = searching_users[selected_partner]
                 
                 # Remove both users from searching
-                partner_chat_id = partner_info.get("chat_id")
-                partner_message_id = partner_info.get("message_id")
-                
                 if user_id in searching_users:
                     del searching_users[user_id]
-                if partner_id in searching_users:
-                    del searching_users[partner_id]
+                if selected_partner in searching_users:
+                    del searching_users[selected_partner]
                 
-                # Синхронизируем с базой данных
+                # Update database
                 db.update_searching_users(searching_users)
                 
                 # Add to active chats
-                active_chats[user_id] = partner_id
-                active_chats[partner_id] = user_id
+                active_chats[user_id] = selected_partner
+                active_chats[selected_partner] = user_id
                 
-                # Синхронизируем с базой данных
+                # Update database
                 db.update_active_chats(active_chats)
                 
-                # Notify both users
+                # Cancel timer update task
+                update_timer_task.cancel()
+                
+                # Notify users
                 try:
-                    # Отправляем сообщение пользователю
+                    # Notify current user
                     await context.bot.edit_message_text(
                         chat_id=chat_id,
                         message_id=message_id,
+                        text="✅ *Собеседник найден!*\n\nМожете начинать общение.",
+                        parse_mode="Markdown",
+                        reply_markup=InlineKeyboardMarkup([
+                            [InlineKeyboardButton("❌ Завершить чат", callback_data="end_chat")]
+                        ])
+                    )
+                    
+                    # Notify partner
+                    await context.bot.send_message(
+                        chat_id=int(selected_partner),
                         text="✅ *Собеседник найден!*\n\nМожете начинать общение.",
                         parse_mode="Markdown",
                         reply_markup=InlineKeyboardMarkup([
@@ -1066,14 +1120,38 @@ async def continuous_search(user_id: str, context: ContextTypes.DEFAULT_TYPE) ->
                 
                 return
             
-            # Wait before checking again
-            await asyncio.sleep(1)
+            # Check if search timed out (2 minutes)
+            if elapsed_search_time > 120:
+                if user_id in searching_users:
+                    del searching_users[user_id]
+                db.update_searching_users(searching_users)
+                
+                try:
+                    await context.bot.edit_message_text(
+                        chat_id=chat_id,
+                        message_id=message_id,
+                        text="⌛ *Поиск завершен*\n\nК сожалению, собеседник не был найден. Попробуйте еще раз.",
+                        parse_mode="Markdown",
+                        reply_markup=InlineKeyboardMarkup(MAIN_KEYBOARD)
+                    )
+                except Exception as e:
+                    logger.error(f"Error sending timeout message: {e}")
+                
+                update_timer_task.cancel()
+                return
+            
+            # Wait a short time before next check
+            await asyncio.sleep(0.5)  # Check twice per second
         
-        # Если поиск был отменен, отменяем задачу обновления таймера
+        # If search was cancelled
         update_timer_task.cancel()
         
     except Exception as e:
         logger.error(f"Error in continuous search: {e}")
+        # Try to clean up
+        if user_id in searching_users:
+            del searching_users[user_id]
+        db.update_searching_users(searching_users)
 
 async def update_search_timer_for_user(user_id: str, context: ContextTypes.DEFAULT_TYPE, chat_id: int, message_id: int, start_time: float) -> None:
     """Update search timer for a specific user."""
