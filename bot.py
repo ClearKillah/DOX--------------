@@ -530,86 +530,123 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         
         # Forward message to partner
         try:
+            # Debug info
+            logger.info(f"Partner ID: {partner_id}, Type: {type(partner_id)}")
+            
+            # Convert partner_id to integer explicitly
+            partner_id_int = int(partner_id)
+            
             # Handle different message types
             if update.message.text:
                 logger.info(f"Forwarding text message from {user_id} to {partner_id}")
-                await context.bot.send_message(
-                    chat_id=int(partner_id),
+                sent_message = await context.bot.send_message(
+                    chat_id=partner_id_int,
                     text=update.message.text,
                     reply_markup=InlineKeyboardMarkup([
                         [InlineKeyboardButton("❌ Завершить чат", callback_data="end_chat")]
                     ])
                 )
+                
+                logger.info(f"Message successfully sent to {partner_id_int}, message ID: {sent_message.message_id}")
+                
             elif update.message.photo:
                 logger.info(f"Forwarding photo from {user_id} to {partner_id}")
                 photo = update.message.photo[-1]
-                await context.bot.send_photo(
-                    chat_id=int(partner_id),
+                sent_message = await context.bot.send_photo(
+                    chat_id=partner_id_int,
                     photo=photo.file_id,
                     caption=update.message.caption or "",
                     reply_markup=InlineKeyboardMarkup([
                         [InlineKeyboardButton("❌ Завершить чат", callback_data="end_chat")]
                     ])
                 )
+                
+                logger.info(f"Photo successfully sent to {partner_id_int}, message ID: {sent_message.message_id}")
+                
             elif update.message.voice:
                 logger.info(f"Forwarding voice message from {user_id} to {partner_id}")
-                await context.bot.send_voice(
-                    chat_id=int(partner_id),
+                sent_message = await context.bot.send_voice(
+                    chat_id=partner_id_int,
                     voice=update.message.voice.file_id,
                     reply_markup=InlineKeyboardMarkup([
                         [InlineKeyboardButton("❌ Завершить чат", callback_data="end_chat")]
                     ])
                 )
+                
+                logger.info(f"Voice message successfully sent to {partner_id_int}, message ID: {sent_message.message_id}")
+                
             elif update.message.video:
                 logger.info(f"Forwarding video from {user_id} to {partner_id}")
-                await context.bot.send_video(
-                    chat_id=int(partner_id),
+                sent_message = await context.bot.send_video(
+                    chat_id=partner_id_int,
                     video=update.message.video.file_id,
                     caption=update.message.caption or "",
                     reply_markup=InlineKeyboardMarkup([
                         [InlineKeyboardButton("❌ Завершить чат", callback_data="end_chat")]
                     ])
                 )
+                
+                logger.info(f"Video successfully sent to {partner_id_int}, message ID: {sent_message.message_id}")
+                
             elif update.message.sticker:
                 logger.info(f"Forwarding sticker from {user_id} to {partner_id}")
-                await context.bot.send_sticker(
-                    chat_id=int(partner_id),
+                sent_message = await context.bot.send_sticker(
+                    chat_id=partner_id_int,
                     sticker=update.message.sticker.file_id,
                     reply_markup=InlineKeyboardMarkup([
                         [InlineKeyboardButton("❌ Завершить чат", callback_data="end_chat")]
                     ])
                 )
+                
+                logger.info(f"Sticker successfully sent to {partner_id_int}, message ID: {sent_message.message_id}")
+                
             elif update.message.animation:
                 logger.info(f"Forwarding animation from {user_id} to {partner_id}")
-                await context.bot.send_animation(
-                    chat_id=int(partner_id),
+                sent_message = await context.bot.send_animation(
+                    chat_id=partner_id_int,
                     animation=update.message.animation.file_id,
                     caption=update.message.caption or "",
                     reply_markup=InlineKeyboardMarkup([
                         [InlineKeyboardButton("❌ Завершить чат", callback_data="end_chat")]
                     ])
                 )
+                
+                logger.info(f"Animation successfully sent to {partner_id_int}, message ID: {sent_message.message_id}")
+                
+            elif update.message.document:
+                # Only forward files less than 20MB
+                if update.message.document.file_size <= 20 * 1024 * 1024:
+                    logger.info(f"Forwarding document from {user_id} to {partner_id}")
+                    sent_message = await context.bot.send_document(
+                        chat_id=partner_id_int,
+                        document=update.message.document.file_id,
+                        caption=update.message.caption or "",
+                        reply_markup=InlineKeyboardMarkup([
+                            [InlineKeyboardButton("❌ Завершить чат", callback_data="end_chat")]
+                        ])
+                    )
+                    logger.info(f"Document successfully sent to {partner_id_int}, message ID: {sent_message.message_id}")
+                else:
+                    logger.warning(f"File too large to forward: {update.message.document.file_size} bytes")
+                    await update.message.reply_text("⚠️ Файл слишком большой для пересылки (>20MB)")
+                    await context.bot.send_message(
+                        chat_id=partner_id_int,
+                        text="[Собеседник пытался отправить слишком большой файл]",
+                        reply_markup=InlineKeyboardMarkup([
+                            [InlineKeyboardButton("❌ Завершить чат", callback_data="end_chat")]
+                        ])
+                    )
             else:
                 logger.warning(f"Unsupported message type from {user_id}")
                 await context.bot.send_message(
-                    chat_id=int(partner_id),
+                    chat_id=partner_id_int,
                     text="[Собеседник отправил неподдерживаемый тип сообщения]",
                     reply_markup=InlineKeyboardMarkup([
                         [InlineKeyboardButton("❌ Завершить чат", callback_data="end_chat")]
                     ])
                 )
             
-            # Send confirmation to sender
-            try:
-                await update.message.reply_text(
-                    "✅ Сообщение отправлено",
-                    reply_markup=InlineKeyboardMarkup([
-                        [InlineKeyboardButton("❌ Завершить чат", callback_data="end_chat")]
-                    ])
-                )
-            except Exception as e:
-                logger.error(f"Error sending confirmation to {user_id}: {e}")
-            
+            # Don't send confirmation to sender to avoid cluttering the chat
             return CHATTING
             
         except telegram.error.Unauthorized:
@@ -623,16 +660,105 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
             
         except Exception as e:
             logger.error(f"Error forwarding message from {user_id} to {partner_id}: {e}")
-            await end_chat_session(user_id, partner_id, context)
+            
+            # Try to send a message to the user about the error
             await update.message.reply_text(
-                "❌ Ошибка при отправке сообщения. Чат был завершен.",
+                "⚠️ Возникла ошибка при отправке сообщения. Попробуйте еще раз.",
+                reply_markup=InlineKeyboardMarkup([
+                    [InlineKeyboardButton("❌ Завершить чат", callback_data="end_chat")]
+                ])
+            )
+            
+            # Don't end the chat on single message failure
+            return CHATTING
+    
+    # Process commands even if in chat
+    if update.message.text and update.message.text.startswith('/'):
+        # Strip the / and any @ mention
+        command = update.message.text.split(' ')[0].lower()
+        if '@' in command:
+            command = command.split('@')[0]
+        command = command[1:]
+        
+        logger.info(f"User {user_id} sent command: {command}")
+        
+        if command == 'start':
+            # End current chat if any
+            if user_id in active_chats:
+                partner_id = active_chats[user_id]
+                await end_chat_session(user_id, partner_id, context)
+            
+            await update.message.reply_text(
+                text=WELCOME_TEXT,
+                parse_mode="Markdown",
                 reply_markup=InlineKeyboardMarkup(MAIN_KEYBOARD)
             )
             return START
+            
+        elif command == 'end' or command == 'stop':
+            # End current chat if any
+            if user_id in active_chats:
+                partner_id = active_chats[user_id]
+                await end_chat_session(user_id, partner_id, context)
+                
+                await update.message.reply_text(
+                    "❌ Чат завершен. Вы можете начать новый поиск.",
+                    reply_markup=InlineKeyboardMarkup([
+                        [InlineKeyboardButton("🔍 Новый поиск", callback_data="find_chat")],
+                        [InlineKeyboardButton("🔙 Главное меню", callback_data="back_to_menu")]
+                    ])
+                )
+                return START
+            else:
+                await update.message.reply_text(
+                    "⚠️ Вы не находитесь в активном чате.",
+                    reply_markup=InlineKeyboardMarkup(MAIN_KEYBOARD)
+                )
+                return START
+                
+        elif command == 'help':
+            help_text = (
+                "*Доступные команды:*\n\n"
+                "/start - Вернуться в главное меню\n"
+                "/end - Завершить текущий чат\n"
+                "/help - Показать эту справку\n\n"
+                "В чате вы можете отправлять:\n"
+                "• Текстовые сообщения\n"
+                "• Фотографии\n"
+                "• Видео\n"
+                "• Голосовые сообщения\n"
+                "• Стикеры\n"
+                "• Документы (до 20MB)\n\n"
+                "Для завершения чата используйте кнопку 'Завершить чат' или команду /end"
+            )
+            
+            await update.message.reply_text(
+                text=help_text,
+                parse_mode="Markdown",
+                reply_markup=InlineKeyboardMarkup([
+                    [InlineKeyboardButton("🔙 Назад", callback_data="back_to_menu")]
+                ])
+            )
+            
+            # If in chat, stay in CHATTING state
+            if user_id in active_chats:
+                return CHATTING
+            else:
+                return START
     
     # Handle other message types (profile editing, group chat, etc.)
     # ... rest of the function remains unchanged ...
     
+    # If we're in a chat, stay in CHATTING state
+    if user_id in active_chats:
+        return CHATTING
+    
+    # Default response if not in chat or editing profile
+    await update.message.reply_text(
+        text=WELCOME_TEXT,
+        parse_mode="Markdown",
+        reply_markup=InlineKeyboardMarkup(MAIN_KEYBOARD)
+    )
     return START
 
 async def find_chat(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
@@ -744,6 +870,7 @@ async def continuous_search(user_id: str, context: ContextTypes.DEFAULT_TYPE) ->
         # Get search info
         search_info = searching_users.get(user_id)
         if not search_info:
+            logger.warning(f"User {user_id} search info not found")
             return
         
         chat_id = search_info.get("chat_id")
@@ -758,12 +885,17 @@ async def continuous_search(user_id: str, context: ContextTypes.DEFAULT_TYPE) ->
         user_gender = user_data.get("gender")
         user_age = user_data.get("age")
         
+        logger.info(f"Starting continuous search for user {user_id}")
+        
         while user_id in searching_users:
             current_time = time.time()
             elapsed_search_time = current_time - start_time
             
             # Collect all potential partners
             potential_partners = []
+            
+            # Show current search status
+            logger.info(f"User {user_id} searching for {int(elapsed_search_time)}s, {len(searching_users)} users searching total")
             
             for partner_id, partner_info in searching_users.items():
                 if partner_id == user_id:
@@ -811,8 +943,13 @@ async def continuous_search(user_id: str, context: ContextTypes.DEFAULT_TYPE) ->
                     # Otherwise pick the highest score
                     selected_partner = potential_partners[0][0]
                 
+                logger.info(f"Found partner for user {user_id}: {selected_partner}")
+                
                 # Get partner info
                 partner_info = searching_users[selected_partner]
+                
+                # Cancel timer update task
+                update_timer_task.cancel()
                 
                 # Remove both users from searching
                 if user_id in searching_users:
@@ -823,38 +960,87 @@ async def continuous_search(user_id: str, context: ContextTypes.DEFAULT_TYPE) ->
                 # Update database
                 db.update_searching_users(searching_users)
                 
-                # Add to active chats
+                # Set up active chats (ensure both directions are created)
                 active_chats[user_id] = selected_partner
                 active_chats[selected_partner] = user_id
                 
                 # Update database
                 db.update_active_chats(active_chats)
                 
-                # Cancel timer update task
-                update_timer_task.cancel()
+                # Log current active chats for debugging
+                logger.info(f"Active chats after match: {active_chats}")
                 
                 # Notify users
                 try:
                     # Notify current user
-                    await context.bot.edit_message_text(
+                    try:
+                        await context.bot.edit_message_text(
+                            chat_id=chat_id,
+                            message_id=message_id,
+                            text="✅ *Собеседник найден!*\n\nМожете начинать общение.",
+                            parse_mode="Markdown",
+                            reply_markup=InlineKeyboardMarkup([
+                                [InlineKeyboardButton("❌ Завершить чат", callback_data="end_chat")]
+                            ])
+                        )
+                        logger.info(f"Notification sent to user {user_id}")
+                    except Exception as e:
+                        logger.error(f"Error notifying user {user_id}: {e}")
+                        # Try to send a new message if edit fails
+                        await context.bot.send_message(
+                            chat_id=chat_id,
+                            text="✅ *Собеседник найден!*\n\nМожете начинать общение.",
+                            parse_mode="Markdown",
+                            reply_markup=InlineKeyboardMarkup([
+                                [InlineKeyboardButton("❌ Завершить чат", callback_data="end_chat")]
+                            ])
+                        )
+                    
+                    # Notify partner
+                    partner_chat_id = partner_info.get("chat_id")
+                    partner_message_id = partner_info.get("message_id")
+                    
+                    try:
+                        # Try to edit partner's search message
+                        await context.bot.edit_message_text(
+                            chat_id=partner_chat_id,
+                            message_id=partner_message_id,
+                            text="✅ *Собеседник найден!*\n\nМожете начинать общение.",
+                            parse_mode="Markdown",
+                            reply_markup=InlineKeyboardMarkup([
+                                [InlineKeyboardButton("❌ Завершить чат", callback_data="end_chat")]
+                            ])
+                        )
+                        logger.info(f"Notification sent to partner {selected_partner}")
+                    except Exception as e:
+                        logger.error(f"Error editing partner message: {e}")
+                        # Try to send a new message if edit fails
+                        await context.bot.send_message(
+                            chat_id=partner_chat_id,
+                            text="✅ *Собеседник найден!*\n\nМожете начинать общение.",
+                            parse_mode="Markdown",
+                            reply_markup=InlineKeyboardMarkup([
+                                [InlineKeyboardButton("❌ Завершить чат", callback_data="end_chat")]
+                            ])
+                        )
+                    
+                    # Send welcome messages to both users
+                    await context.bot.send_message(
                         chat_id=chat_id,
-                        message_id=message_id,
-                        text="✅ *Собеседник найден!*\n\nМожете начинать общение.",
-                        parse_mode="Markdown",
+                        text="👋 Вы можете отправлять текст, фотографии, видео, голосовые сообщения, стикеры и документы.\n\nЧтобы завершить чат, нажмите кнопку 'Завершить чат'.",
                         reply_markup=InlineKeyboardMarkup([
                             [InlineKeyboardButton("❌ Завершить чат", callback_data="end_chat")]
                         ])
                     )
                     
-                    # Notify partner
                     await context.bot.send_message(
-                        chat_id=int(selected_partner),
-                        text="✅ *Собеседник найден!*\n\nМожете начинать общение.",
-                        parse_mode="Markdown",
+                        chat_id=partner_chat_id,
+                        text="👋 Вы можете отправлять текст, фотографии, видео, голосовые сообщения, стикеры и документы.\n\nЧтобы завершить чат, нажмите кнопку 'Завершить чат'.",
                         reply_markup=InlineKeyboardMarkup([
                             [InlineKeyboardButton("❌ Завершить чат", callback_data="end_chat")]
                         ])
                     )
+                    
                 except Exception as e:
                     logger.error(f"Error notifying users about match: {e}")
                 
@@ -1510,83 +1696,51 @@ async def leave_group_chat(update: Update, context: ContextTypes.DEFAULT_TYPE, g
 async def end_chat_session(user_id: str, partner_id: str, context: ContextTypes.DEFAULT_TYPE) -> None:
     """End a chat session between two users."""
     global active_chats
+    logger.info(f"Ending chat session between {user_id} and {partner_id}")
     
-    # Проверка, что чат действительно существует
-    if user_id not in active_chats or partner_id not in active_chats:
-        logger.warning(f"Attempted to end non-existent chat between {user_id} and {partner_id}")
-        return
-        
-    # Check if the users are actually chatting with each other
-    if active_chats.get(user_id) != partner_id or active_chats.get(partner_id) != user_id:
-        logger.warning(f"Chat mismatch: {user_id} -> {active_chats.get(user_id)}, {partner_id} -> {active_chats.get(partner_id)}")
-        return
+    # Save chat data before removal
+    user1_chat_data = active_chats.get(user_id)
+    user2_chat_data = active_chats.get(partner_id)
     
-    # Remove from active chats
+    # Remove from active_chats
     if user_id in active_chats:
         del active_chats[user_id]
+        logger.info(f"Removed {user_id} from active chats")
+    
     if partner_id in active_chats:
         del active_chats[partner_id]
+        logger.info(f"Removed {partner_id} from active chats")
     
-    # Sync active chats with database
+    # Update in database
     db.update_active_chats(active_chats)
+    logger.info(f"Updated active chats in database, current count: {len(active_chats)}")
     
-    # Update user statistics
+    # Notify partner that chat has ended if not already notified
     try:
-        # Increment chat count for both users
-        user_data = db.get_user_data(user_id)
-        user_data["chat_count"] = user_data.get("chat_count", 0) + 1
-        db.update_user_data(user_id, user_data)
-        
-        partner_data = db.get_user_data(partner_id)
-        partner_data["chat_count"] = partner_data.get("chat_count", 0) + 1
-        db.update_user_data(partner_id, partner_data)
-    except Exception as e:
-        logger.error(f"Error updating user statistics: {e}")
-    
-    # Log the end of the chat
-    logger.info(f"Chat ended between {user_id} and {partner_id}")
-    
-    # Clear any resources associated with this chat
-    try:
-        # Clean up any pending messages or states
-        context.bot_data.pop(f'last_msg_{partner_id}', None)
-        context.bot_data.pop(f'last_msg_{user_id}', None)
-        
-        # Отключаем любые активные таймеры или задачи, связанные с чатом
-        # (если они были добавлены в других частях кода)
-        if f'chat_timer_{user_id}' in context.bot_data:
-            timer = context.bot_data.pop(f'chat_timer_{user_id}')
-            if hasattr(timer, 'cancel'):
-                timer.cancel()
-                
-        if f'chat_timer_{partner_id}' in context.bot_data:
-            timer = context.bot_data.pop(f'chat_timer_{partner_id}')
-            if hasattr(timer, 'cancel'):
-                timer.cancel()
-    except Exception as e:
-        logger.error(f"Error clearing chat resources: {e}")
-    
-    # Notify the partner that the chat has ended
-    try:
-        # Клавиатура для оценки собеседника
-        rating_keyboard = [
-            [
-                InlineKeyboardButton("👍", callback_data=f"rate_pos_{user_id}"),
-                InlineKeyboardButton("👎", callback_data=f"rate_neg_{user_id}")
-            ],
-            [InlineKeyboardButton("🔍 Новый поиск", callback_data="find_chat")],
-            [InlineKeyboardButton("🔙 Главное меню", callback_data="back_to_menu")]
-        ]
-        
         await context.bot.send_message(
-            chat_id=partner_id,
-            text="❌ *Собеседник покинул чат*\n\nВы можете оценить собеседника и начать новый поиск.",
+            chat_id=int(partner_id),
+            text="❌ *Собеседник завершил чат*\n\nВы можете начать новый поиск.",
             parse_mode="Markdown",
-            reply_markup=InlineKeyboardMarkup(rating_keyboard)
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton("🔍 Новый поиск", callback_data="find_chat")],
+                [InlineKeyboardButton("🔙 Главное меню", callback_data="back_to_menu")]
+            ])
         )
-        
+        logger.info(f"Sent end chat notification to {partner_id}")
     except Exception as e:
-        logger.error(f"Error notifying partner about chat end: {e}")
+        logger.error(f"Error notifying partner {partner_id} about chat end: {e}")
+    
+    # Log chat end
+    logger.info(f"Chat between {user_id} and {partner_id} has ended")
+    
+    # Increment stats
+    user1_data = db.get_user_data(user_id)
+    user1_data['total_chats'] = user1_data.get('total_chats', 0) + 1
+    db.update_user_data(user_id, user1_data)
+    
+    user2_data = db.get_user_data(partner_id)
+    user2_data['total_chats'] = user2_data.get('total_chats', 0) + 1
+    db.update_user_data(partner_id, user2_data)
 
 async def end_chat(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """End the current chat."""
